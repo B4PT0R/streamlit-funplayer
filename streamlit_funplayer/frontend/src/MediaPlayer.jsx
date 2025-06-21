@@ -1,10 +1,37 @@
 import React, { Component } from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-import 'three';
-import 'videojs-vr/dist/videojs-vr';
-import 'videojs-vr/dist/videojs-vr.css';
+//import 'three';
 import MediaManager from './MediaManager';
+
+// ✅ MODIFIÉ: Import conditionnel pour éviter les Feature Policy warnings
+let videojsVR = null;
+let videojsPlaylist = null;
+
+const loadVRPlugin = async () => {
+  if (!videojsVR) {
+    try {
+      videojsVR = await import('videojs-vr/dist/videojs-vr');
+      await import('videojs-vr/dist/videojs-vr.css');
+      console.log('MediaPlayer: VR plugin loaded');
+    } catch (error) {
+      console.warn('MediaPlayer: VR plugin not available:', error.message);
+    }
+  }
+  return videojsVR;
+};
+
+const loadPlaylistPlugin = async () => {
+  if (!videojsPlaylist) {
+    try {
+      videojsPlaylist = await import('videojs-playlist');
+      console.log('MediaPlayer: Playlist plugin loaded');
+    } catch (error) {
+      console.warn('MediaPlayer: Playlist plugin not available:', error.message);
+    }
+  }
+  return videojsPlaylist;
+};
 
 /**
  * MediaPlayer - Simplifié avec MediaManager
@@ -21,6 +48,11 @@ class MediaPlayer extends Component {
     
     // ✅ NOUVEAU: MediaManager pour les utilitaires
     this.mediaManager = new MediaManager();
+
+    // ✅ AJOUT: Flags pour éviter double initialisation
+    this.isInitialized = false;
+    this.isInitializing = false;
+    this.isDestroyed = false;
     
     // ✅ CORRIGÉ: Tout dans le state React
     this.state = {
@@ -35,24 +67,36 @@ class MediaPlayer extends Component {
   // ============================================================================
 
   componentDidMount() {
+    // ✅ FIX: S'assurer qu'on n'est pas marqué comme destroyed
+    this.isDestroyed = false;
+    this.isInitialized = false;
+    this.isInitializing = false;
+    
     const { playlist } = this.props;
     const hasContent = playlist && playlist.length > 0;
     
-    if (hasContent) {
+    if (hasContent && !this.isInitialized && !this.isInitializing) {
       setTimeout(() => {
-        this.initPlayer();
+        if (!this.isDestroyed) {
+          this.initPlayer();
+        }
       }, 50);
     }
   }
 
   componentDidUpdate(prevProps) {
+    // ✅ FIX: Ne skip que si vraiment détruit
+    if (this.isDestroyed) return;
+    
     const { playlist } = this.props;
     const hasContent = playlist && playlist.length > 0;
     const hadContent = prevProps.playlist && prevProps.playlist.length > 0;
     
-    if (!hadContent && hasContent && !this.player) {
+    if (!hadContent && hasContent && !this.isInitialized && !this.isInitializing) {
       setTimeout(() => {
-        this.initPlayer();
+        if (!this.isDestroyed) {
+          this.initPlayer();
+        }
       }, 50);
       return;
     }
@@ -63,6 +107,8 @@ class MediaPlayer extends Component {
   }
 
   componentWillUnmount() {
+    // ✅ AJOUT: Marquer comme détruit
+    this.isDestroyed = true;
     this.cleanup();
   }
 
@@ -70,8 +116,18 @@ class MediaPlayer extends Component {
   // INITIALIZATION
   // ============================================================================
 
-  initPlayer = () => {
-    if (!this.videoRef?.current || this.player) return;
+  initPlayer = async () => {
+    // Guards multiples
+    if (this.isDestroyed || this.isInitialized || this.isInitializing) {
+      return;
+    }
+
+    if (!this.videoRef?.current) {
+      console.error('MediaPlayer: Video element not available');
+      return;
+    }
+
+    this.isInitializing = true;
 
     try {
       const videoElement = this.videoRef.current;
@@ -84,6 +140,11 @@ class MediaPlayer extends Component {
         playsinline: true,
         preload: 'metadata',
         techOrder: ['html5'],
+        html5: {
+          vhs: {
+            overrideNative: false
+          }
+        },
         controlBar: {
           children: [
             'playToggle', 'currentTimeDisplay', 'timeDivider', 
@@ -94,24 +155,63 @@ class MediaPlayer extends Component {
       };
 
       this.player = videojs(videoElement, options);
+      
+      if (!this.player) {
+        throw new Error('Failed to create Video.js player');
+      }
+
       this.setupBasicCallbacks();
 
       this.player.ready(() => {
+        if (this.isDestroyed) return;
+
         this.isPlayerReady = true;
-        this.setupAdvancedCallbacks();
-        this.initVRPlugin();
+        this.isInitialized = true;
+        this.isInitializing = false;
         
-        this.initPlaylistPlugin().then(() => {
-          console.log('MediaPlayer: Full initialization complete');
+        this.setupAdvancedCallbacks();
+        
+        // Initialisation async des plugins
+        this.initPlugins().then(() => {
+          console.log('MediaPlayer: Initialization complete');
         }).catch((error) => {
-          console.error('MediaPlayer: Playlist plugin failed:', error);
+          console.error('MediaPlayer: Plugin initialization failed:', error);
           this.props.onError?.(error);
         });
       });
 
     } catch (error) {
       console.error('MediaPlayer: Failed to initialize Video.js:', error);
+      this.isInitializing = false;
       this.props.onError?.(error);
+    }
+  }
+
+  initPlugins = async () => {
+    if (this.isDestroyed || !this.player) return;
+
+    try {
+      const [vrResult, playlistResult] = await Promise.allSettled([
+        this.initVRPlugin(),
+        this.initPlaylistPlugin()
+      ]);
+
+      if (vrResult.status === 'rejected') {
+        console.warn('MediaPlayer: VR plugin initialization failed:', vrResult.reason);
+      }
+
+      if (playlistResult.status === 'rejected') {
+        console.warn('MediaPlayer: Playlist plugin initialization failed:', playlistResult.reason);
+      }
+
+      // Traiter la playlist initiale si disponible
+      if (this.props.playlist && this.props.playlist.length > 0) {
+        await this.updatePlaylist(this.props.playlist);
+      }
+
+    } catch (error) {
+      console.error('MediaPlayer: Plugin initialization error:', error);
+      throw error;
     }
   }
 
@@ -120,29 +220,31 @@ class MediaPlayer extends Component {
   // ============================================================================
 
   initPlaylistPlugin = async () => {
-    if (!this.player) return;
+    if (!this.player || this.isDestroyed) return;
 
     try {
-      if (typeof this.player.playlist !== 'function') {
-        const playlistPlugin = await import('videojs-playlist');
-        if (playlistPlugin.default) {
-          videojs.registerPlugin('playlist', playlistPlugin.default);
-        }
+      const playlistPlugin = await loadPlaylistPlugin();
+
+      if (!playlistPlugin) {
+        console.log('MediaPlayer: Playlist plugin not available, skipping');
+        return;
+      }
+
+      if (typeof this.player.playlist !== 'function' && playlistPlugin.default) {
+        videojs.registerPlugin('playlist', playlistPlugin.default);
       }
 
       if (typeof this.player.playlist !== 'function') {
-        throw new Error('Playlist plugin failed to load');
+        throw new Error('Playlist plugin failed to register');
       }
 
+      // Setup event listeners
       this.player.on('playlistchange', this.handlePlaylistChange);
       this.player.on('playlistitem', this.handlePlaylistItem);
       
-      if (this.props.playlist && this.props.playlist.length > 0) {
-        this.updatePlaylist(this.props.playlist);
-      }
-      
     } catch (error) {
       console.error('MediaPlayer: Playlist plugin initialization failed:', error);
+      throw error;
     }
   }
 
@@ -152,14 +254,10 @@ class MediaPlayer extends Component {
     }
 
     try {
-      console.log('MediaPlayer: Updating playlist with', playlist.length, 'items');
-      
       if (this.state.lastPlaylistProcessed === playlist) {
-        console.log('MediaPlayer: Same playlist, skipping processing');
         return;
       }
       
-      // ✅ MODIFIÉ: Conversion directe sans enrichissement (déjà fait par FunPlayer)
       const vjsPlaylist = this.mediaManager.convertToVjsPlaylist(playlist);
       
       if (vjsPlaylist.length === 0) {
@@ -182,7 +280,6 @@ class MediaPlayer extends Component {
         lastPlaylistProcessed: playlist 
       });
       
-      console.log('MediaPlayer: Playlist updated successfully');
       this.props.onPlaylistProcessed?.(vjsPlaylist);
       
     } catch (error) {
@@ -196,12 +293,10 @@ class MediaPlayer extends Component {
   // ============================================================================
 
   handlePlaylistChange = () => {
-    console.log('MediaPlayer: Playlist changed');
   }
 
   handlePlaylistItem = () => {
     const newIndex = this.player.playlist.currentItem();
-    console.log('MediaPlayer: Playlist item changed to index', newIndex);
     
     if (newIndex !== this.state.currentPlaylistIndex) {
       this.setState({ currentPlaylistIndex: newIndex });
@@ -209,7 +304,6 @@ class MediaPlayer extends Component {
       setTimeout(() => {
         const currentItem = this.getCurrentPlaylistItem();
         if (currentItem && currentItem.poster) {
-          console.log(`🖼️ Setting poster for item ${newIndex}:`, currentItem.poster.substring(0, 50) + '...');
           this.player.poster(currentItem.poster);
         }
       }, 100);
@@ -348,16 +442,19 @@ class MediaPlayer extends Component {
   // ============================================================================
   
   initVRPlugin = async () => {
-    if (!this.player) return;
+    if (!this.player || this.isDestroyed) return;
 
     try {
+      const vrPlugin = await loadVRPlugin();
+      
+      if (!vrPlugin) return;
+
       if (typeof this.player.vr === 'function') {
         this.configureVRPlugin();
         return;
       }
 
       if (!videojs.getPlugin('vr')) {
-        const vrPlugin = await import('videojs-vr');
         if (vrPlugin.default) {
           const vrWrapper = function(options = {}) {
             return new vrPlugin.default(this, options);
@@ -369,11 +466,12 @@ class MediaPlayer extends Component {
       this.configureVRPlugin();
       
     } catch (error) {
-      console.error('MediaPlayer: VR plugin initialization failed:', error);
+      console.warn('MediaPlayer: VR plugin initialization failed:', error);
     }
   }
-
   configureVRPlugin = () => {
+    if (!this.player || this.isDestroyed) return;
+    
     try {
       if (!this.player.mediainfo) {
         this.player.mediainfo = {};
@@ -381,11 +479,13 @@ class MediaPlayer extends Component {
       
       this.player.vr({
         projection: 'AUTO',
-        debug: true,
-        forceCardboard: true
+        debug: false, // ✅ MODIFIÉ: Réduire les logs
+        forceCardboard: false // ✅ MODIFIÉ: Plus conservateur
       });
+      
+      console.log('MediaPlayer: VR plugin configured');
     } catch (error) {
-      console.error('MediaPlayer: VR configuration failed:', error);
+      console.warn('MediaPlayer: VR configuration failed:', error);
     }
   }
 
@@ -444,23 +544,34 @@ class MediaPlayer extends Component {
   // ============================================================================
 
   cleanup = () => {
+    this.isDestroyed = true;
+    this.isInitialized = false;
+    this.isInitializing = false;
+    
     if (this.mediaManager) {
-      this.mediaManager.cleanup();
+      try {
+        this.mediaManager.cleanup();
+      } catch (error) {
+        console.error('MediaPlayer: MediaManager cleanup error:', error);
+      }
     }
     
     if (this.player) {
       try {
+        if (!this.player.paused()) {
+          this.player.pause();
+        }
+        
         if (typeof this.player.dispose === 'function') {
           this.player.dispose();
         }
       } catch (error) {
-        console.error('MediaPlayer: Error during cleanup:', error);
+        console.error('MediaPlayer: Error during player cleanup:', error);
       } finally {
         this.player = null;
         this.isPlayerReady = false;
         this.initRetries = 0;
         
-        // ✅ CORRIGÉ: Reset state au lieu de propriétés
         this.setState({
           currentPlaylistIndex: -1,
           hasPlaylist: false,

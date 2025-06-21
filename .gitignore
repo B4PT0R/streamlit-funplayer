@@ -66,6 +66,7 @@ node_modules/
 bower_components/
 #spkg package-lock.json
 #spkg bootstrap.min.css
+#spkg streamlit_funplayer/frontend/build
 yarn.lock
 npm-debug.log
 yarn-error.log

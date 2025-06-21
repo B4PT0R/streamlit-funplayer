@@ -5,6 +5,7 @@ import FunscriptManager from './FunscriptManager';
 import PlaylistComponent from './PlaylistComponent';
 import HapticSettingsComponent from './HapticSettingsComponent';
 import HapticVisualizerComponent from './HapticVisualizerComponent';
+import MediaManager from './MediaManager';
 
 class FunPlayer extends Component {
   constructor(props) {
@@ -28,14 +29,25 @@ class FunPlayer extends Component {
     this.funscriptRef = React.createRef();
     this.mediaPlayerRef = React.createRef();
     
+    // ✅ AJOUT: Flag pour éviter double initialisation
+    this.isInitialized = false;
+    this.isInitializing = false;
+
     // Haptic loop
     this.hapticIntervalId = null;
     this.expectedHapticTime = 0;
   }
 
   componentDidMount() {
-    this.applyTheme();
-    this.initializeManagers();
+    // ✅ FIX: S'assurer qu'on repart sur des bases saines
+    this.isInitialized = false;
+    this.isInitializing = false;
+    
+    // Vérifier qu'on n'initialise qu'une seule fois
+    if (!this.isInitialized && !this.isInitializing) {
+      this.applyTheme();
+      this.initializeManagers();
+    }
   }
 
   componentDidUpdate(prevProps) {
@@ -43,13 +55,17 @@ class FunPlayer extends Component {
       this.applyTheme();
     }
     
-    // ✅ NOUVEAU: Surveiller les changements de playlist
-    if (prevProps.playlist !== this.props.playlist) {
+    // Seulement si vraiment différent et initialisé
+    if (this.isInitialized && prevProps.playlist !== this.props.playlist) {
       this.handlePlaylistUpdate();
     }
   }
 
   componentWillUnmount() {
+    // ✅ AJOUT: Marquer comme non initialisé lors du unmount
+    this.isInitialized = false;
+    this.isInitializing = false;
+    
     this.stopHapticLoop();
     this.cleanup();
   }
@@ -97,6 +113,11 @@ class FunPlayer extends Component {
   handlePlaylistUpdate = async () => {
     const { playlist } = this.props;
     
+    // Seulement si initialisé
+    if (!this.isInitialized) {
+      return;
+    }
+    
     if (!playlist || playlist.length === 0) {
       this.setState({ 
         playlistItems: [],
@@ -107,7 +128,7 @@ class FunPlayer extends Component {
       return;
     }
 
-    // ✅ NOUVEAU: Valider et normaliser la playlist
+    // Valider et normaliser la playlist
     const validItems = playlist.filter(item => 
       item && (item.media || item.funscript || (item.duration && item.duration > 0))
     );
@@ -125,25 +146,23 @@ class FunPlayer extends Component {
     this.setStatus(`Enriching playlist with posters...`);
 
     try {
-      // ✅ NOUVEAU: Enrichir la playlist de référence avec les posters
+      // Enrichir la playlist avec les posters
       if (!this.mediaManager) {
-        // Créer le MediaManager s'il n'existe pas encore
-        const MediaManager = (await import('./MediaManager')).default;
         this.mediaManager = new MediaManager();
       }
 
       const enrichedItems = await this.mediaManager.enrichPlaylistWithPosters(validItems);
 
       this.setState({ 
-        playlistItems: enrichedItems, // ✅ MODIFIÉ: Stocker la playlist enrichie
-        currentPlaylistIndex: -1, // Sera mis à jour par onPlaylistItemChange
+        playlistItems: enrichedItems,
+        currentPlaylistIndex: -1,
         isReady: false 
       });
 
       this.setStatus(`Playlist loaded: ${enrichedItems.length} items with posters`);
       
     } catch (error) {
-      console.error('Failed to enrich playlist with posters:', error);
+      console.error('FunPlayer: Failed to enrich playlist with posters:', error);
       // Fallback: utiliser la playlist sans posters
       this.setState({ 
         playlistItems: validItems,
@@ -156,8 +175,6 @@ class FunPlayer extends Component {
 
   // ✅ NOUVEAU: Callback unifié pour les changements d'item playlist
   handlePlaylistItemChange = async (vjsItem, index) => {
-    console.log('FunPlayer: Playlist item changed to', index, vjsItem);
-    
     // ✅ MODIFIÉ: Mettre à jour l'index IMMÉDIATEMENT
     this.setState({ 
       currentPlaylistIndex: index,
@@ -208,27 +225,61 @@ class FunPlayer extends Component {
   // ============================================================================
 
   initializeManagers = async () => {
+    // Guard contre double initialisation
+    if (this.isInitialized || this.isInitializing) {
+      return;
+    }
+
+    this.isInitializing = true;
+
     try {
-      console.log('Initializing managers...');
+      // Vérifier que les refs existent avant initialisation
+      if (!this.buttplugRef || !this.funscriptRef) {
+        throw new Error('Refs not properly initialized');
+      }
       
+      // Initialiser ButtPlugManager
       this.buttplugRef.current = new ButtPlugManager();
       if (this.buttplugRef.current && typeof this.buttplugRef.current.init === 'function') {
         await this.buttplugRef.current.init();
-        console.log('ButtPlugManager initialized');
+      } else {
+        throw new Error('ButtPlugManager failed to create');
       }
       
+      // Initialiser FunscriptManager
       this.funscriptRef.current = new FunscriptManager();
-      console.log('FunscriptManager created:', this.funscriptRef.current);
+      if (!this.funscriptRef.current) {
+        throw new Error('FunscriptManager failed to create');
+      }
+      
+      // ✅ AJOUT: Marquer comme initialisé AVANT handlePlaylistUpdate
+      this.isInitialized = true;
+      this.isInitializing = false;
       
       this.setStatus('Managers initialized');
       
-      // ✅ NOUVEAU: Traitement initial de la playlist
+      // Traitement initial de la playlist
       this.handlePlaylistUpdate();
       
     } catch (error) {
-      console.error('Manager initialization error:', error);
+      console.error('FunPlayer: Manager initialization error:', error);
+      this.isInitializing = false;
+      this.isInitialized = false;
       this.setError('Failed to initialize managers', error);
     }
+  }
+
+  // ✅ NOUVEAU: Méthode pour réinitialiser si nécessaire
+  reinitializeManagers = async () => {
+    console.log('FunPlayer: Reinitializing managers...');
+    this.isInitialized = false;
+    this.isInitializing = false;
+    
+    // Cleanup existant
+    await this.cleanup();
+    
+    // Réinitialiser
+    await this.initializeManagers();
   }
 
   // ✅ NOUVEAU: Méthodes de chargement funscript inchangées mais simplifiées
@@ -606,22 +657,48 @@ class FunPlayer extends Component {
   }
 
   cleanup = async () => {
-    this.stopHapticLoop();
-    
-    if (this.buttplugRef.current) {
-      await this.buttplugRef.current.cleanup();
-    }
-    
-    if (this.funscriptRef.current) {
-      this.funscriptRef.current.reset();
-    }
-    
-    this.setState({
-      isPlaying: false,
-      currentActuatorData: new Map(),
-      status: 'Cleaned up',
-      error: null
-    });
+      this.stopHapticLoop();
+      
+      // ✅ MODIFIÉ: Cleanup conditionnel et avec gestion d'erreur
+      if (this.buttplugRef.current) {
+        try {
+          await this.buttplugRef.current.cleanup();
+        } catch (error) {
+          console.error('FunPlayer: ButtPlug cleanup error:', error);
+        }
+        this.buttplugRef.current = null;
+      }
+      
+      if (this.funscriptRef.current) {
+        try {
+          this.funscriptRef.current.reset();
+        } catch (error) {
+          console.error('FunPlayer: Funscript cleanup error:', error);
+        }
+        this.funscriptRef.current = null;
+      }
+      
+      if (this.mediaManager) {
+        try {
+          this.mediaManager.cleanup();
+        } catch (error) {
+          console.error('FunPlayer: MediaManager cleanup error:', error);
+        }
+        this.mediaManager = null;
+      }
+      
+      // ✅ AJOUT: Reset état d'initialisation
+      this.isInitialized = false;
+      this.isInitializing = false;
+      
+      this.setState({
+        isPlaying: false,
+        currentActuatorData: new Map(),
+        status: 'Cleaned up',
+        error: null,
+        currentPlaylistIndex: -1,
+        playlistItems: []
+      });
   }
 
   // ============================================================================

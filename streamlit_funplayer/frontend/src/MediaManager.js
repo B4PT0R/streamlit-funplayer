@@ -187,8 +187,6 @@ class MediaManager {
           canvas.height = video.videoHeight;
         }
         
-        console.log(`Video: ${video.videoWidth}x${video.videoHeight} → Canvas: ${canvas.width}x${canvas.height}`);
-        
         // Aller au temps voulu
         video.currentTime = Math.min(timeOffset, video.duration - 1);
       };
@@ -203,7 +201,8 @@ class MediaManager {
           
           if (dataURL && dataURL.length > 1000) {
             const sizeKB = Math.round(dataURL.length * 0.75 / 1024);
-            console.log(`Generated base64 poster at ${video.currentTime}s (${sizeKB}KB)`);
+            // ✅ NETTOYÉ: Log simple
+            console.log(`Generated poster (${sizeKB}KB)`);
             cleanup();
             resolve(dataURL);
           } else {
@@ -233,14 +232,13 @@ class MediaManager {
 
   enrichPlaylistWithPosters = async (playlist) => {
     const enrichedPlaylist = [];
-    const posterCache = new Map(); // Cache par URL de média
+    const posterCache = new Map();
     
     for (const [index, item] of playlist.entries()) {
       const enrichedItem = { ...item };
       
       // Skip si poster déjà présent
       if (item.poster) {
-        console.log(`📷 Using existing poster for item ${index + 1}`);
         enrichedPlaylist.push(enrichedItem);
         continue;
       }
@@ -252,22 +250,17 @@ class MediaManager {
           if (posterCache.has(item.media)) {
             enrichedItem.poster = posterCache.get(item.media);
             enrichedItem._generatedPoster = true;
-            console.log(`🎯 Using cached poster for item ${index + 1}`);
           } else {
-            console.log(`🎬 Generating poster for item ${index + 1}...`);
             const posterDataURL = await this.generatePosterFromVideo(item.media, 10);
             enrichedItem.poster = posterDataURL;
             enrichedItem._generatedPoster = true;
             
             // Mettre en cache
             posterCache.set(item.media, posterDataURL);
-            console.log(`✅ Poster generated and cached for item ${index + 1}`);
           }
         } catch (error) {
-          console.warn(`❌ Failed to generate poster for item ${index + 1}:`, error.message);
+          console.warn(`Failed to generate poster for item ${index + 1}:`, error.message);
         }
-      } else {
-        console.log(`ℹ️ No poster for item ${index + 1} (not a video or no media)`);
       }
       
       enrichedPlaylist.push(enrichedItem);
@@ -313,9 +306,7 @@ class MediaManager {
               src: silentAudioUrl,
               type: 'audio/wav'
             }];
-            console.log(`Generated silent audio for funscript-only item (${funscriptDuration}s)`);
           } else {
-            console.warn('Could not extract duration from funscript');
             vjsItem.sources = [];
           }
         } catch (error) {
@@ -327,7 +318,7 @@ class MediaManager {
         vjsItem.sources = [];
       }
       
-      // Ajouter poster si fourni (important pour Video.js)
+      // Ajouter poster si fourni
       if (item.poster) {
         vjsItem.poster = item.poster;
       }

@@ -14,6 +14,11 @@ class ButtPlugManager {
     this.client = null;
     this.connector = null;
     this.initialized = false;
+
+    // ✅ AJOUT: État d'initialisation détaillé
+    this.initInProgress = false;
+    this.initPromise = null;
+    this.isDestroyed = false;
     
     // Device management
     this.devices = new Map(); // deviceIndex -> ButtplugClientDevice
@@ -48,23 +53,59 @@ class ButtPlugManager {
   // ============================================================================
 
   async init() {
+    // ✅ AJOUT: Protection contre double initialisation
+    if (this.isDestroyed) {
+      throw new Error('ButtPlugManager has been destroyed');
+    }
+
     if (this.initialized) {
       this._log('Already initialized, skipping');
       return true;
     }
 
+    if (this.initInProgress) {
+      this._log('Initialization in progress, waiting...');
+      return this.initPromise;
+    }
+
+    // ✅ AJOUT: Créer une promesse d'initialisation partagée
+    this.initInProgress = true;
+    this.initPromise = this._performInit();
+
     try {
+      const result = await this.initPromise;
+      return result;
+    } finally {
+      this.initInProgress = false;
+      this.initPromise = null;
+    }
+  }
+
+  async _performInit() {
+    try {
+      // ✅ AJOUT: Vérification que les modules sont disponibles
+      const { 
+        ButtplugClient, 
+        ButtplugBrowserWebsocketClientConnector,
+        ActuatorType 
+      } = await import('buttplug');
+
+      if (!ButtplugClient || !ButtplugBrowserWebsocketClientConnector) {
+        throw new Error('Buttplug modules not available');
+      }
+
       this.client = new ButtplugClient('FunPlayer');
       this.connector = new ButtplugBrowserWebsocketClientConnector('ws://localhost:12345');
       
-      // Setup event listeners
+      // Setup event listeners avec guards
       this.client.addListener('deviceadded', this._onDeviceAdded);
       this.client.addListener('deviceremoved', this._onDeviceRemoved);
       this.client.addListener('disconnect', this._onDisconnect);
       
       this.initialized = true;
-      this._log('ButtPlug client initialized');
+      this._log('ButtPlug client initialized successfully');
       return true;
+
     } catch (error) {
       this._error('Initialization failed', error);
       this.initialized = false;
@@ -73,7 +114,15 @@ class ButtPlugManager {
   }
 
   async connect(address = 'ws://localhost:12345') {
-    if (this.isConnected) return true;
+    // ✅ AJOUT: Vérifications préalables
+    if (this.isDestroyed) {
+      throw new Error('ButtPlugManager has been destroyed');
+    }
+
+    if (this.isConnected) {
+      this._log('Already connected');
+      return true;
+    }
 
     // Init si pas encore fait
     const initSuccess = await this.init();
@@ -82,8 +131,15 @@ class ButtPlugManager {
       return false;
     }
 
+    // ✅ AJOUT: Vérifier qu'on n'a pas été détruit pendant l'init
+    if (this.isDestroyed) {
+      this._log('Destroyed during initialization, aborting connect');
+      return false;
+    }
+
     // Créer nouveau connector si nécessaire ou si adresse différente
     if (!this.connector || this.connector._url !== address) {
+      const { ButtplugBrowserWebsocketClientConnector } = await import('buttplug');
       this.connector = new ButtplugBrowserWebsocketClientConnector(address);
     }
 
@@ -91,6 +147,14 @@ class ButtPlugManager {
       this._log('Connecting to Intiface Central...');
       
       await this.client.connect(this.connector);
+      
+      // ✅ AJOUT: Vérifier qu'on n'a pas été détruit pendant la connexion
+      if (this.isDestroyed) {
+        this._log('Destroyed during connection, disconnecting');
+        await this.client.disconnect();
+        return false;
+      }
+
       this.isConnected = true;
       
       // Load existing devices
@@ -102,6 +166,7 @@ class ButtPlugManager {
       this._log(`Connected with ${existingDevices.length} devices`);
       this._notifyConnection(true);
       return true;
+
     } catch (error) {
       this._error('Connection failed', error);
       return false;
@@ -123,6 +188,9 @@ class ButtPlugManager {
   }
 
   async cleanup() {
+    // ✅ AJOUT: Marquer comme détruit immédiatement
+    this.isDestroyed = true;
+    
     // Arrêter toutes les commandes en cours
     if (this.isConnected && this.client) {
       try {
@@ -143,18 +211,27 @@ class ButtPlugManager {
     
     // Nettoyer les listeners et références
     if (this.client) {
-      this.client.removeAllListeners();
+      try {
+        this.client.removeAllListeners();
+      } catch (error) {
+        this._error('Remove listeners failed during cleanup', error);
+      }
       this.client = null;
     }
+    
     this.connector = null;
     this.throttleMap.clear();
     
     // Reset de l'état
     this.initialized = false;
+    this.initInProgress = false;
+    this.initPromise = null;
     this.isConnected = false;
     this.isScanning = false;
     this.devices.clear();
     this._resetDevice();
+
+    this._log('Cleanup completed');
   }
 
   // ============================================================================
@@ -243,18 +320,18 @@ class ButtPlugManager {
   // ============================================================================
 
   async vibrate(value, actuatorIndex = null) {
+    if (this.isDestroyed) return false;
     return this._sendScalarCommand(ActuatorType.Vibrate, value, actuatorIndex);
   }
 
   async oscillate(value, actuatorIndex = null) {
+    if (this.isDestroyed) return false;
     return this._sendScalarCommand(ActuatorType.Oscillate, value, actuatorIndex);
   }
 
   async linear(value, duration = 100, actuatorIndex = null) {
-    if (!this.selectedDevice) {
-      throw new Error('No device selected');
-    }
-
+    if (this.isDestroyed || !this.selectedDevice) return false;
+    
     const resolvedIndex = this._resolveActuatorIndex('linear', actuatorIndex);
     if (resolvedIndex === null) {
       throw new Error('No linear actuator available');
@@ -262,7 +339,7 @@ class ButtPlugManager {
 
     try {
       const clampedValue = Math.max(0, Math.min(1, value));
-      const clampedDuration = Math.max(1, Math.min(20000, duration)); // 1ms to 20s
+      const clampedDuration = Math.max(1, Math.min(20000, duration));
       
       await this.selectedDevice.linear([[clampedValue, clampedDuration]]);
       return true;
@@ -273,10 +350,8 @@ class ButtPlugManager {
   }
 
   async rotate(value, actuatorIndex = null) {
-    if (!this.selectedDevice) {
-      throw new Error('No device selected');
-    }
-
+    if (this.isDestroyed || !this.selectedDevice) return false;
+    
     const resolvedIndex = this._resolveActuatorIndex('rotate', actuatorIndex);
     if (resolvedIndex === null) {
       throw new Error('No rotate actuator available');
@@ -315,7 +390,7 @@ class ButtPlugManager {
   }
 
   async stopAll() {
-    if (!this.isConnected || !this.client) return;
+    if (this.isDestroyed || !this.isConnected || !this.client) return;
     
     try {
       await this.client.stopAllDevices();
@@ -630,12 +705,16 @@ class ButtPlugManager {
   // ============================================================================
 
   _onDeviceAdded = (device) => {
+    if (this.isDestroyed) return;
+    
     this.devices.set(device.index, device);
     this._log(`Device added: ${device.name} (${device.index})`);
     this._notifyDeviceChanged();
   }
 
   _onDeviceRemoved = (device) => {
+    if (this.isDestroyed) return;
+    
     this.devices.delete(device.index);
     
     if (this.selectedDevice?.index === device.index) {
@@ -647,6 +726,8 @@ class ButtPlugManager {
   }
 
   _onDisconnect = () => {
+    if (this.isDestroyed) return;
+    
     this._log('Disconnected from server');
     this._resetState();
   }

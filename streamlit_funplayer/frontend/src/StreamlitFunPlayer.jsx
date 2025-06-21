@@ -1,24 +1,98 @@
 import React from 'react';
 import { Streamlit, StreamlitComponentBase, withStreamlitConnection } from 'streamlit-component-lib';
 import FunPlayer from './FunPlayer';
-import './theme.css'; // Import CSS universel - seulement dans le wrapper Streamlit
+import './theme.css';
 
 class StreamlitFunPlayer extends StreamlitComponentBase {
+  constructor(props) {
+    super(props);
+    
+    // ✅ AJOUT: État pour éviter les appels prématurés
+    this.state = {
+      isStreamlitReady: false,
+      lastHeight: 0
+    };
+    
+    // ✅ AJOUT: Debouncer pour setFrameHeight
+    this.resizeTimeout = null;
+  }
 
-  // Convertir le thème Streamlit en variables CSS
+  componentDidMount() {
+    // ✅ MODIFIÉ: Attendre que Streamlit soit vraiment prêt
+    this.waitForStreamlitReady().then(() => {
+      this.setState({ isStreamlitReady: true });
+      this.handleResize();
+    });
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    // ✅ MODIFIÉ: Seulement resize si Streamlit est prêt
+    if (this.state.isStreamlitReady && !prevState.isStreamlitReady) {
+      this.handleResize();
+    }
+  }
+
+  componentWillUnmount() {
+    // ✅ AJOUT: Cleanup du timeout
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout);
+    }
+  }
+
+  // ✅ NOUVEAU: Attendre que Streamlit soit vraiment initialisé
+  waitForStreamlitReady = async () => {
+    return new Promise((resolve) => {
+      // Vérifier si Streamlit et ses méthodes sont disponibles
+      const checkStreamlit = () => {
+        if (Streamlit && 
+            typeof Streamlit.setFrameHeight === 'function' && 
+            typeof Streamlit.setComponentValue === 'function') {
+          resolve();
+        } else {
+          setTimeout(checkStreamlit, 10);
+        }
+      };
+      checkStreamlit();
+    });
+  }
+
+  // ✅ MODIFIÉ: Resize avec debouncing et vérifications
+  handleResize = () => {
+    // Annuler le timeout précédent
+    if (this.resizeTimeout) {
+      clearTimeout(this.resizeTimeout);
+    }
+    
+    // ✅ MODIFIÉ: Debouncer et vérifier l'état
+    this.resizeTimeout = setTimeout(() => {
+      if (!this.state.isStreamlitReady || !Streamlit || typeof Streamlit.setFrameHeight !== 'function') {
+        return;
+      }
+
+      try {
+        const height = document.body.scrollHeight;
+        
+        // ✅ AJOUT: Éviter les appels redondants
+        if (Math.abs(height - this.state.lastHeight) > 5) { // Seuil de 5px
+          Streamlit.setFrameHeight(height);
+          this.setState({ lastHeight: height });
+        }
+      } catch (error) {
+        console.error('StreamlitFunPlayer: setFrameHeight failed:', error);
+      }
+    }, 50);
+  }
+
+  // Convertir le thème Streamlit en variables CSS - INCHANGÉ
   getStreamlitThemeVariables = () => {
     const { theme } = this.props;
     
-    // Si pas de thème Streamlit, utiliser les valeurs par défaut du CSS
     if (!theme) return {};
 
-    // Mapping direct Streamlit → Variables CSS universelles
     const themeVars = {};
     
-    // Couleurs principales
     if (theme.primaryColor) {
       themeVars['--primary-color'] = theme.primaryColor;
-      // Dériver les couleurs d'interaction depuis la couleur primaire
       themeVars['--hover-color'] = this.hexToRgba(theme.primaryColor, 0.1);
       themeVars['--active-color'] = this.hexToRgba(theme.primaryColor, 0.2);
     }
@@ -33,7 +107,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     
     if (theme.textColor) {
       themeVars['--text-color'] = theme.textColor;
-      // Dériver la couleur disabled depuis la couleur du texte
       themeVars['--disabled-color'] = this.hexToRgba(theme.textColor, 0.3);
     }
     
@@ -49,7 +122,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       themeVars['--border-color'] = theme.borderColor;
     }
     
-    // Polices
     if (theme.font) {
       themeVars['--font-family'] = theme.font;
     }
@@ -62,7 +134,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       themeVars['--heading-font-family'] = theme.headingFont;
     }
     
-    // Radius et bordures
     if (theme.baseRadius) {
       themeVars['--base-radius'] = theme.baseRadius;
     }
@@ -71,7 +142,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       themeVars['--widget-border-width'] = theme.showWidgetBorder ? '1px' : '0px';
     }
     
-    // Sidebar si défini
     if (theme.sidebar) {
       if (theme.sidebar.backgroundColor) {
         themeVars['--sidebar-background-color'] = theme.sidebar.backgroundColor;
@@ -87,14 +157,11 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     return themeVars;
   };
 
-  // Utilitaire pour convertir hex en rgba
+  // Utilitaire hex vers rgba - INCHANGÉ
   hexToRgba = (hex, alpha) => {
     if (!hex) return null;
     
-    // Nettoyer le hex
     hex = hex.replace('#', '');
-    
-    // Parser les composants RGB
     const r = parseInt(hex.substr(0, 2), 16);
     const g = parseInt(hex.substr(2, 2), 16);
     const b = parseInt(hex.substr(4, 2), 16);
@@ -102,30 +169,9 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   };
 
-  componentDidMount() {
-    this.handleResize();
-  }
-
-  componentDidUpdate() {
-    this.handleResize();
-  }
-
-  handleResize = () => {
-    // Petit délai pour laisser le DOM se mettre à jour
-    if (!Streamlit || typeof Streamlit.setFrameHeight !== 'function') {
-      setTimeout(() => this.handleResize(), 100);
-      return;
-    }
-    setTimeout(() => {
-      const height = document.body.scrollHeight;
-      Streamlit.setFrameHeight(height);
-    }, 50);
-  }
-
   convertCustomTheme = (theme) => {
     const themeVars = {};
     
-    // Mapping direct des propriétés
     const mappings = {
       'primaryColor': '--primary-color',
       'backgroundColor': '--background-color', 
@@ -143,7 +189,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       }
     });
     
-    // Générer les couleurs dérivées si primaryColor fourni
     if (theme.primaryColor) {
       themeVars['--hover-color'] = this.hexToRgba(theme.primaryColor, 0.1);
       themeVars['--focus-color'] = this.hexToRgba(theme.primaryColor, 0.25);
@@ -154,29 +199,39 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
 
   render() {
     const { args, theme: streamlitTheme } = this.props;
+    const { isStreamlitReady } = this.state;
     
     // Extract props
     const playlist = args?.playlist || null;
-    // ✅ NOUVEAU: Thème custom depuis Python
     const customTheme = args?.theme || null;
     
-    // ✅ PRIORITÉ: Custom theme > Streamlit theme
     const themeVariables = customTheme ? 
       this.convertCustomTheme(customTheme) : 
       this.getStreamlitThemeVariables();
     
     const dataTheme = (customTheme?.base || streamlitTheme?.base) === 'dark' ? 'dark' : 'light';
     
+    // ✅ MODIFIÉ: Rendre seulement si Streamlit est prêt
     return (
       <div
         style={themeVariables} 
         data-theme={dataTheme}
         className="streamlit-funplayer"
       >
-        <FunPlayer 
-          playlist={playlist}
-          onResize={this.handleResize}
-        />
+        {isStreamlitReady ? (
+          <FunPlayer 
+            playlist={playlist}
+            onResize={this.handleResize}
+          />
+        ) : (
+          <div style={{ 
+            padding: '20px', 
+            textAlign: 'center',
+            color: 'var(--text-color, #666)'
+          }}>
+            Loading...
+          </div>
+        )}
       </div>
     );
   }
