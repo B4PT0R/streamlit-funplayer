@@ -474,7 +474,7 @@ pip install -e .  # Install with built frontend
 
 ## 📄 License
 
-MIT License - see LICENSE file for details.
+Creative Commons - see LICENSE file for details.
 
 ## 🙏 Acknowledgments
 
