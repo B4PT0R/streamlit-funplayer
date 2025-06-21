@@ -18,7 +18,6 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 develop-eggs/
 dist/
 downloads/
@@ -53,8 +52,8 @@ ENV/
 Thumbs.db
 
 # Build and distribution
-dist/
-build/
+/dist/
+/build/
 
 # Version control
 .git/
