@@ -1,0 +1,562 @@
+/* ============================================================================
+   FUNPLAYER SIMPLE THEME - Variables Streamlit + Classes réelles uniquement
+   ============================================================================ */
+
+/* === VARIABLES STREAMLIT (tweakables depuis Python) === */
+:root {
+  /* Couleurs Streamlit - surchargées par le composant */
+  --primary-color: #FF4B4B;
+  --background-color: #FFFFFF;
+  --secondary-background-color: #F0F2F6;
+  --text-color: #262730;
+  --border-color: #E6EBF5;
+  
+  /* Polices Streamlit */
+  --font-family: "Source Sans Pro", sans-serif;
+  --font-code: "Source Code Pro", monospace;
+  
+  /* Radius et espacements Streamlit */
+  --base-radius: 0.5rem;
+  --spacing: 0.5rem;
+  
+  /* Couleurs dérivées automatiquement */
+  --hover-color: rgba(255, 75, 75, 0.1);
+  --focus-color: rgba(255, 75, 75, 0.25);
+  --disabled-color: rgba(38, 39, 48, 0.3);
+}
+
+[data-theme="dark"] {
+  --background-color: #0E1117;
+  --secondary-background-color: #262730;
+  --text-color: #FAFAFA;
+  --border-color: #464954;
+}
+
+/* ============================================================================
+   STRUCTURE - Blocs empilés avec bordures raccordées (comme dans FunPlayer)
+   ============================================================================ */
+
+.fun-player {
+  font-family: var(--font-family);
+  font-size: 0.875rem;
+  color: var(--text-color);
+}
+
+/* Colonne principale (contenu existant) */
+.fp-main-column {
+  flex: 1;
+  min-width: 0; /* Pour éviter overflow */
+}
+
+/* Blocs empilés */
+.fp-block {
+  background: var(--secondary-background-color);
+  border: 1px solid var(--border-color);
+  margin: 0;
+}
+
+.fp-block:first-child {
+  border-radius: var(--base-radius) var(--base-radius) 0 0;
+}
+
+.fp-block:last-child {
+  border-radius: 0 0 var(--base-radius) var(--base-radius);
+  margin-bottom: var(--spacing);
+}
+
+.fp-block:only-child {
+  border-radius: var(--base-radius);
+  margin-bottom: var(--spacing);
+}
+
+.fp-block + .fp-block {
+  border-top: none;
+}
+
+/* ============================================================================
+   LAYOUTS - Uniquement ceux utilisés dans FunPlayer
+   ============================================================================ */
+
+/* Layout horizontal avec justification (HapticSettings, StatusBar) */
+.fp-layout-horizontal {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing);
+}
+
+/* Layout horizontal simple (groupes de contrôles) */
+.fp-layout-row {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+}
+
+/* Layout vertical (settings expandés) */
+.fp-layout-column {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 0.5); /* ✅ Réduit de 0.5 à 0.25 */
+}
+
+/* Paddings */
+.fp-section {
+  padding: calc(var(--spacing) * 2);
+}
+
+.fp-section-compact {
+  padding: var(--spacing) calc(var(--spacing) * 2);
+  min-height: 40px;
+}
+
+/* Flex utilities */
+.fp-flex { flex: 1; }
+.fp-no-shrink { flex-shrink: 0; }
+
+/* ============================================================================
+   CONTRÔLES - Uniquement boutons, inputs, selects utilisés
+   ============================================================================ */
+
+/* Boutons */
+.fp-btn {
+  font-family: var(--font-family);
+  font-size: 0.8rem;
+  background: var(--background-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--base-radius) * 0.6);
+  padding: calc(var(--spacing) * 0.5) var(--spacing);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  min-height: 28px;
+  white-space: nowrap;
+}
+
+.fp-btn:hover {
+  background: var(--hover-color);
+  border-color: var(--primary-color);
+}
+
+.fp-btn-primary {
+  background: var(--primary-color);
+  color: white;
+  border-color: var(--primary-color);
+}
+
+.fp-btn-primary:hover {
+  opacity: 0.9;
+}
+
+.fp-btn-ghost {
+  background: none;
+  border: none;
+  opacity: 0.7;
+}
+
+.fp-btn-ghost:hover {
+  background: var(--hover-color);
+  opacity: 1;
+}
+
+/* Inputs */
+.fp-input,
+.fp-select {
+  font-family: var(--font-family);
+  font-size: 0.8rem;
+  background: var(--background-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--base-radius) * 0.5);
+  padding: calc(var(--spacing) * 0.5) var(--spacing)*0.5;
+  transition: border-color 0.15s ease;
+  min-height: 28px;
+}
+
+.fp-input:hover,
+.fp-input:focus,
+.fp-select:hover,
+.fp-select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.fp-input:focus,
+.fp-select:focus {
+  box-shadow: 0 0 0 2px var(--focus-color);
+}
+
+.fp-select {
+  cursor: pointer;
+}
+
+/* Input numérique */
+.fp-input-number {
+  font-family: var(--font-family);
+  font-size: 0.8rem;
+  background: var(--background-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--base-radius) * 0.4);
+  padding: calc(var(--spacing) * 0.5);
+  width: 80px;
+  text-align: center;
+}
+
+/* Checkbox */
+.fp-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--primary-color);
+  cursor: pointer;
+}
+
+/* Range slider */
+.fp-range {
+  width: 100%;
+  height: 2px;
+  background: var(--border-color);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.fp-range::-webkit-slider-thumb,
+.fp-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary-color);
+  cursor: pointer;
+  border: 1px solid white;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ============================================================================
+   TYPOGRAPHY - Éléments de texte utilisés
+   ============================================================================ */
+
+.fp-title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-color);
+  margin: 5px;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.fp-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-color);
+  margin-bottom: 0;
+}
+
+.fp-badge {
+  font-family: var(--font-code);
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--secondary-background-color);
+  padding: 2px 6px;
+  border-radius: calc(var(--base-radius) * 0.3);
+  white-space: nowrap;
+}
+
+.fp-unit {
+  font-size: 0.75rem;
+  color: var(--text-color);
+  opacity: 0.7;
+}
+
+.fp-status-dot {
+  font-size: 0.8rem;
+}
+
+.fp-device-name {
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ============================================================================
+   COMPOSANTS - Patterns spécialisés FunPlayer
+   ============================================================================ */
+
+/* Élément expandable (ChannelSettings) */
+.fp-expandable {
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--base-radius) * 0.7);
+  transition: all 0.15s ease;
+  overflow: hidden;
+}
+
+.fp-expandable:hover {
+  border-color: var(--primary-color);
+}
+
+/* Ligne compacte avec contrôles */
+.fp-compact-line {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  padding: calc(var(--spacing) * 0.5) var(--spacing);
+  min-height: 32px;
+}
+
+/* Zone expandue */
+.fp-expanded {
+  border-top: 1px solid var(--border-color);
+  padding: var(--spacing);
+  background: var(--background-color);
+}
+
+/* Toggle avec label */
+.fp-toggle {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+/* Chevron d'expansion */
+.fp-chevron {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  background: none;
+  border: none;
+  color: var(--text-color);
+  cursor: pointer;
+  border-radius: calc(var(--base-radius) * 0.3);
+  transition: all 0.15s ease;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+
+.fp-chevron:hover {
+  background: var(--hover-color);
+  opacity: 1;
+}
+
+
+/* ============================================================================
+   PLAYLIST
+   ============================================================================ */
+
+/* Item de playlist avec layout horizontal pour miniature + texte */
+.fp-playlist-item {
+  padding: calc(var(--spacing) * 0.75) var(--spacing);
+  border-bottom: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 0.75);
+}
+
+.fp-playlist-item:last-child {
+  border-bottom: none;
+}
+
+.fp-playlist-item:hover {
+  background: var(--hover-color);
+}
+
+.fp-playlist-item.active {
+  background: var(--primary-color);
+  color: white;
+}
+
+.fp-playlist-item.active:hover {
+  background: var(--primary-color);
+  opacity: 0.9;
+}
+
+/* ✅ MINIATURE POSTER */
+.fp-item-thumbnail {
+  width: 48px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: calc(var(--base-radius) * 0.3);
+  overflow: hidden;
+  background: var(--secondary-background-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border-color);
+}
+
+.fp-item-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ✅ CONTENU TEXTE FLEXIBLE */
+.fp-item-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 0.25);
+}
+
+/* Titre et infos de l'item - modifiés pour le nouveau layout */
+.fp-item-title {
+  font-weight: 500;
+  font-size: 0.8rem;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fp-item-info {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  display: flex;
+  gap: calc(var(--spacing) * 0.5);
+}
+
+.fp-playlist-item.active .fp-item-info {
+  opacity: 0.9;
+}
+
+/* ============================================================================
+   HAPTIC SETTINGS - Seulement 2 classes ajoutées
+   ============================================================================ */
+
+/* Divider horizontal pour séparer les sections */
+.fp-divider {
+  height: 2px;
+  background: var(--border-color);
+  margin: calc(var(--spacing) * 2) 0;
+  opacity: 0.5;
+}
+
+/* Margin bottom large pour espacer les sections */
+.fp-mb-lg {
+  margin-bottom: calc(var(--spacing)*0.25);
+}
+
+/* ============================================================================
+   MEDIA PLAYER - Customisation Video.js
+   ============================================================================ */
+
+.media-player {
+  border-radius: var(--base-radius);
+  overflow: hidden;
+}
+
+.vjs-theme-funplayer .vjs-control-bar {
+  background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 100%);
+}
+
+.vjs-theme-funplayer .vjs-play-progress {
+  background: var(--primary-color);
+}
+
+.vjs-theme-funplayer .vjs-volume-level {
+  background: var(--primary-color);
+}
+
+.vjs-theme-funplayer .vjs-big-play-button {
+  background: rgba(255, 75, 75, 0.8);
+  border-color: var(--primary-color);
+}
+
+/* Contrôles playlist dans Video.js */
+.vjs-theme-funplayer .vjs-previous-button,
+.vjs-theme-funplayer .vjs-next-button {
+  background: var(--primary-color);
+  font-size: 1.2em;
+  width: 2.5em;
+}
+
+.vjs-theme-funplayer .vjs-previous-button:disabled,
+.vjs-theme-funplayer .vjs-next-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.vjs-theme-funplayer .vjs-previous-button:hover:not(:disabled),
+.vjs-theme-funplayer .vjs-next-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ============================================================================
+   HAPTIC VISUALIZER
+   ============================================================================ */
+
+.haptic-visualizer {
+  height: auto
+}
+
+.haptic-visualizer .fp-section {
+  /* ✅ MODIFIÉ: Padding réduit pour le canvas */
+  padding: calc(var(--spacing) * 0.5); /* 4px au lieu de 16px */
+  height: auto
+}
+
+.haptic-visualizer-canvas {
+  width: 100%;
+  height:100px;
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: calc(var(--base-radius) * 0.5);
+  display: block;
+}
+
+/* ============================================================================
+   RESPONSIVE - Mobile
+   ============================================================================ */
+
+@media (max-width: 768px) {
+
+  .fun-player {
+    flex-direction: column;
+  }
+  
+  .fp-playlist-column {
+    width: 100%;
+    order: -1; /* Playlist en haut sur mobile */
+  }
+  
+  .fp-playlist-items {
+    max-height: 150px;
+  }
+
+  .fp-layout-horizontal {
+    gap: calc(var(--spacing) * 0.5);
+  }
+  
+  .fp-device-name {
+    max-width: 100px;
+  }
+  
+  .fp-btn {
+    font-size: 0.7rem;
+    min-height: 22px;
+  }
+  
+  .fp-input-number {
+    width: 60px;
+  }
+  
+  .fp-section {
+    padding: var(--spacing);
+  }
+  
+  .visualizer-canvas {
+    height: 120px;
+  }
+}
