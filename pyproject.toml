@@ -1,0 +1,197 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools-scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "streamlit-funplayer"
+version = "0.1.0"
+description = "Streamlit component for synchronized media and haptic playback using funscripts and Buttplug.io compatible devices"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Baptiste Ferrand", email = "bferrand.math@gmail.com"}
+]
+maintainers = [
+    {name = "Baptiste Ferrand", email = "bferrand.math@gmail.com"}
+]
+keywords = [
+    "streamlit", 
+    "component", 
+    "media-player", 
+    "haptic-feedback", 
+    "funscript", 
+    "buttplug", 
+    "adult-tech",
+    "interactive-media",
+    "vr",
+    "react"
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License", 
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: JavaScript",
+    "Framework :: Streamlit",
+    "Topic :: Multimedia :: Video :: Display",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Environment :: Web Environment",
+    "Operating System :: OS Independent"
+]
+requires-python = ">=3.9"
+dependencies = [
+    "streamlit>=1.45.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "playwright>=1.40.0",
+    "black>=23.0.0",
+    "isort>=5.12.0", 
+    "flake8>=6.0.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.0.0"
+]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0", 
+    "playwright>=1.40.0"
+]
+docs = [
+    "sphinx>=7.0.0",
+    "sphinx-rtd-theme>=1.3.0",
+    "myst-parser>=2.0.0"
+]
+examples = [
+    "requests>=2.31.0",
+    "pillow>=10.0.0"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/B4PT0R/streamlit-funplayer"
+"Repository" = "https://github.com/B4PT0R/streamlit-funplayer"
+"Bug Tracker" = "https://github.com/B4PT0R/streamlit-funplayer/issues"
+"Documentation" = "https://github.com/B4PT0R/streamlit-funplayer#readme"
+"Changelog" = "https://github.com/B4PT0R/streamlit-funplayer/releases"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["streamlit_funplayer*"]
+exclude = ["tests*", "e2e*", "examples*", "docs*"]
+
+[tool.setuptools.package-data]
+"streamlit_funplayer" = [
+    "frontend/build/**/*",
+    "frontend/build/static/css/*",
+    "frontend/build/static/js/*", 
+    "frontend/build/static/media/*"
+]
+
+# Development tools configuration
+[tool.black]
+line-length = 88
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | streamlit_funplayer/frontend
+)/
+'''
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+known_first_party = ["streamlit_funplayer"]
+skip_glob = ["streamlit_funplayer/frontend/**/*"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[[tool.mypy.overrides]]
+module = "streamlit_funplayer.frontend.*"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --strict-markers"
+testpaths = [
+    "tests",
+    "e2e"
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "e2e: marks tests as end-to-end tests"
+]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.coverage.run]
+source = ["streamlit_funplayer"]
+omit = [
+    "*/tests/*",
+    "*/e2e/*", 
+    "*/frontend/*",
+    "*/__init__.py"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:"
+]
+
+# Frontend build configuration (for reference)
+[tool.frontend]
+# These settings are for documentation only
+# Actual frontend config is in frontend/package.json and frontend/vite.config.ts
+build_dir = "streamlit_funplayer/frontend/build"
+source_dir = "streamlit_funplayer/frontend/src"
+dependencies = [
+    "react@^18.3.1",
+    "react-dom@^18.3.1", 
+    "buttplug@^3.2.2",
+    "video.js@^8.23.3",
+    "videojs-playlist@^5.2.0",
+    "videojs-vr@^2.0.0",
+    "three@^0.177.0",
+    "streamlit-component-lib@^2.0.0"
+]

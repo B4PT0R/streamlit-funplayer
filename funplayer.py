@@ -5,35 +5,14 @@ Test simple pour streamlit-funplayer
 
 import streamlit as st
 import json
-import base64
-from pathlib import Path
 
 try:
-    from streamlit_funplayer import funplayer
+    from streamlit_funplayer import funplayer, file_to_data_url
 except ImportError:
     st.error("streamlit-funplayer not found! Run: pip install -e .")
     st.stop()
 
 st.set_page_config(page_title="FunPlayer",layout="wide", initial_sidebar_state="collapsed")
-
-def file_to_data_url(uploaded_file):
-    """Convert uploaded file to data URL"""
-    if not uploaded_file:
-        return None
-    
-    file_content = uploaded_file.getvalue()
-    file_extension = Path(uploaded_file.name).suffix.lower()
-    
-    mime_types = {
-        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-        '.avi': 'video/x-msvideo', '.ogv': 'video/ogg',
-        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
-        '.m4a': 'audio/mp4', '.aac': 'audio/aac'
-    }
-    
-    mime_type = mime_types.get(file_extension, 'application/octet-stream')
-    base64_content = base64.b64encode(file_content).decode('utf-8')
-    return f"data:{mime_type};base64,{base64_content}"
 
 # UI
 st.title("🎮 FunPlayer")
@@ -62,8 +41,9 @@ with st.expander("Get some help:"):
     That's it!
     """))
 
-# Component key for forcing reload
+
 with st.sidebar:
+    # Component key for forcing reload
     component_key = st.text_input("Component Key", "test")
     st.button("Refresh the app")
 

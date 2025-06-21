@@ -130,10 +130,23 @@ actions = [
     {"at": 2000, "pos": 50},
     {"at": 3000, "pos": 0}
 ]
-funscript = create_funscript(actions, metadata={
+
+funscript = {
+    "actions":actions, # required
+
+    #optional metadata
+    "range":100,
+    "version":1,
     "title": "Generated Script",
-    "duration": 3000
-})
+    "duration":3000
+}
+
+funplayer(playlist=[{
+    'media': 'audio.mp3',
+    'funscript': funscript,
+    'poster':'thumbnail.jpg'
+    'title': 'Simple funscript'
+}])
 
 # Multi-channel funscript
 multi_channel = {
