@@ -1,46 +1,97 @@
 import React, { Component } from 'react';
+import managers from './Managers';
 
+/**
+ * ChannelSettingsComponent - ✅ REFACTORISÉ: Réactif aux événements
+ * Plus d'accès directs aux managers, utilise le système d'événements
+ */
 class ChannelSettingsComponent extends Component {
   constructor(props) {
     super(props);
+    
     this.state = {
-      // ✅ SEUL ÉTAT UI - Collapsé par défaut
-      isExpanded: false
+      isExpanded: false,
+      renderTrigger: 0  // ✅ NOUVEAU: Trigger pour re-render
     };
+    
+    this.managersListener = null;
+  }
+
+  componentDidMount() {
+    // ✅ NOUVEAU: Écouter les événements pour re-render
+    this.managersListener = managers.addListener(this.handleManagerEvent);
+  }
+
+  componentWillUnmount() {
+    if (this.managersListener) {
+      this.managersListener();
+    }
   }
 
   // ============================================================================
-  // ACTIONS SUR LE FUNSCRIPT MANAGER (stateless)
+  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS
+  // ============================================================================
+
+  handleManagerEvent = (event, data) => {
+    // ✅ NOUVEAU: Re-render sur événements qui impactent ce canal
+    const eventsToReact = [
+      'funscript:options',     // Options de canal modifiées
+      'buttplug:device',       // Device changé (actuators changent)
+      'buttplug:connection'    // Connexion changée (capabilities changent)
+    ];
+    
+    if (eventsToReact.some(e => event.startsWith(e.split(':')[0]))) {
+      // ✅ Filtrer: seulement si cet événement concerne notre canal
+      if (event === 'funscript:options' && data.channel !== this.props.channel) {
+        return; // Pas notre canal, ignorer
+      }
+      
+      // ✅ Trigger re-render via setState
+      this.setState(prevState => ({ 
+        renderTrigger: prevState.renderTrigger + 1 
+      }));
+    }
+  }
+
+  // ============================================================================
+  // ✅ MODIFIÉ: ACTIONS - Plus de calls onSettingsChange superflus
   // ============================================================================
 
   updateChannelOption = (key, value) => {
-    const { channel, funscriptManagerRef, onSettingsChange } = this.props;
-    const funscriptManager = funscriptManagerRef?.current;
+    const { channel } = this.props;
+    const funscript = managers.getFunscript();
     
-    if (!funscriptManager) return;
+    if (!funscript) return;
     
-    funscriptManager.setOptions(channel, { [key]: value });
-    onSettingsChange?.(channel, key, value);
+    funscript.setOptions(channel, { [key]: value });
+    // ✅ L'événement 'funscript:options' sera déclenché automatiquement
+    // ✅ Le re-render se fera via handleManagerEvent
+    
+    // ✅ CONSERVÉ: Notifier le parent pour les logs/status
+    this.props.onSettingsChange?.(channel, key, value);
   }
 
   resetChannel = () => {
-    const { channel, funscriptManagerRef, onSettingsChange } = this.props;
-    const funscriptManager = funscriptManagerRef?.current;
+    const { channel } = this.props;
+    const funscript = managers.getFunscript();
     
-    if (!funscriptManager) return;
+    if (!funscript) return;
     
-    funscriptManager.resetOptions(channel);
-    onSettingsChange?.(channel, 'reset', null);
+    funscript.resetOptions(channel);
+    // ✅ L'événement 'funscript:options' sera déclenché automatiquement
+    
+    // ✅ CONSERVÉ: Notifier le parent
+    this.props.onSettingsChange?.(channel, 'reset', null);
   }
 
   // ============================================================================
-  // GETTERS DIRECTS DEPUIS LES MANAGERS (stateless)
+  // ✅ MODIFIÉ: GETTERS - Accès direct simplifié
   // ============================================================================
 
   getChannelOptions = () => {
-    const { channel, funscriptManagerRef } = this.props;
-    const funscriptManager = funscriptManagerRef?.current;
-    return funscriptManager?.getOptions(channel) || {};
+    const { channel } = this.props;
+    const funscript = managers.getFunscript();
+    return funscript?.getOptions(channel) || {};
   }
 
   getActuatorOptions = () => {
@@ -73,15 +124,15 @@ class ChannelSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // RENDER METHODS
+  // RENDER METHODS - ✅ INCHANGÉ: Utilise les getters
   // ============================================================================
 
   handleToggleExpanded = () => {
-    this.setState({ isExpanded: !this.state.isExpanded }, () => {
-      // ✅ AJOUT: Trigger refresh après toggle settings
-      if (this.props.onResize) {
-        this.props.onResize();
-      }
+    this.setState(prevState => ({
+      isExpanded: !prevState.isExpanded,
+      renderTrigger: prevState.renderTrigger  // Pas besoin d'incrémenter ici
+    }), () => {
+      this.props.onResize?.();
     });
   }
 

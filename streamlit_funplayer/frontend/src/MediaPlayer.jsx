@@ -1,8 +1,7 @@
 import React, { Component } from 'react';
 import videojs from 'video.js';
 import 'video.js/dist/video-js.css';
-//import 'three';
-import MediaManager from './MediaManager';
+import managers from './Managers'; // ✅ AJOUTÉ: Import du singleton managers
 
 // ✅ MODIFIÉ: Import conditionnel pour éviter les Feature Policy warnings
 let videojsVR = null;
@@ -34,10 +33,10 @@ const loadPlaylistPlugin = async () => {
 };
 
 /**
- * MediaPlayer - Simplifié avec MediaManager
- * Focus sur Video.js et playlist, délègue les utilitaires au MediaManager
+ * MediaPlayer - ✅ REFACTORISÉ: Intégration complète PlaylistManager
  */
 class MediaPlayer extends Component {
+
   constructor(props) {
     super(props);
     this.videoRef = React.createRef();
@@ -45,35 +44,35 @@ class MediaPlayer extends Component {
     this.isPlayerReady = false;
     this.initRetries = 0;
     this.maxRetries = 3;
-    
-    // ✅ NOUVEAU: MediaManager pour les utilitaires
-    this.mediaManager = new MediaManager();
 
-    // ✅ AJOUT: Flags pour éviter double initialisation
+    // ✅ MODIFIÉ: State encore plus simplifié - plus de currentPlaylistIndex
+    this.state = {
+      renderTrigger: 0  // ✅ Seul state restant pour re-render pattern
+    };
+
+    // ✅ SIMPLIFIÉ: Flags de contrôle (pas dans state car pas pour UI)
     this.isInitialized = false;
     this.isInitializing = false;
     this.isDestroyed = false;
     
-    // ✅ CORRIGÉ: Tout dans le state React
-    this.state = {
-      currentPlaylistIndex: -1,
-      hasPlaylist: false,
-      lastPlaylistProcessed: null
-    };
+    this.playlistManager = managers.getPlaylist();
+    this.managersListener = null;
+    
   }
 
   // ============================================================================
-  // LIFECYCLE
+  // ✅ NOUVEAU: LIFECYCLE AVEC PLAYLISTMANAGER
   // ============================================================================
 
   componentDidMount() {
-    // ✅ FIX: S'assurer qu'on n'est pas marqué comme destroyed
     this.isDestroyed = false;
     this.isInitialized = false;
     this.isInitializing = false;
     
-    const { playlist } = this.props;
-    const hasContent = playlist && playlist.length > 0;
+    // ✅ CORRIGÉ: Utiliser la propriété computed
+    this.managersListener = managers.addListener(this.handleManagerEvent);
+    
+    const hasContent = this._hasValidPlaylist();
     
     if (hasContent && !this.isInitialized && !this.isInitializing) {
       setTimeout(() => {
@@ -85,138 +84,110 @@ class MediaPlayer extends Component {
   }
 
   componentDidUpdate(prevProps) {
-    // ✅ FIX: Ne skip que si vraiment détruit
     if (this.isDestroyed) return;
     
-    const { playlist } = this.props;
-    const hasContent = playlist && playlist.length > 0;
-    const hadContent = prevProps.playlist && prevProps.playlist.length > 0;
+    // ✅ SIMPLE: Juste l'initialisation si pas encore fait
+    const hasContent = this._hasValidPlaylist();
     
-    if (!hadContent && hasContent && !this.isInitialized && !this.isInitializing) {
+    if (hasContent && !this.isInitialized && !this.isInitializing) {
       setTimeout(() => {
         if (!this.isDestroyed) {
           this.initPlayer();
         }
       }, 50);
-      return;
-    }
-    
-    if (this.isPlayerReady && hasContent && prevProps.playlist !== playlist) {
-      this.updatePlaylist(playlist);
     }
   }
 
   componentWillUnmount() {
-    // ✅ AJOUT: Marquer comme détruit
     this.isDestroyed = true;
+    
+    // ✅ IMPORTANT: Cleanup listener AVANT de mettre à null
+    if (this.managersListener) {
+      this.managersListener(); // Unsubscribe
+      this.managersListener = null;
+    }
+    
+    // Puis cleanup le reste
     this.cleanup();
   }
 
   // ============================================================================
-  // INITIALIZATION
+  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS PLAYLISTMANAGER
   // ============================================================================
 
-  initPlayer = async () => {
-    // Guards multiples
-    if (this.isDestroyed || this.isInitialized || this.isInitializing) {
-      return;
-    }
-
-    if (!this.videoRef?.current) {
-      console.error('MediaPlayer: Video element not available');
-      return;
-    }
-
-    this.isInitializing = true;
-
-    try {
-      const videoElement = this.videoRef.current;
-      this.registerPlaylistComponents();
-
-      const options = {
-        controls: true,
-        responsive: true,
-        fluid: true,
-        playsinline: true,
-        preload: 'metadata',
-        techOrder: ['html5'],
-        html5: {
-          vhs: {
-            overrideNative: false
-          }
-        },
-        controlBar: {
-          children: [
-            'playToggle', 'currentTimeDisplay', 'timeDivider', 
-            'durationDisplay', 'progressControl', 'PreviousButton', 
-            'NextButton', 'volumePanel', 'fullscreenToggle'
-          ]
+  handleManagerEvent = (event, data) => {
+    console.log('🎬 MediaPlayer.handleManagerEvent received:', event, data);
+    
+    switch (event) {
+      case 'playlist:itemChanged':
+        console.log('🎬 Processing playlist:itemChanged, target index:', data.index);
+        this._syncVideoJsToPlaylistManager(data.index);
+        this._triggerRender();
+        break;
+        
+      case 'playlist:loaded':
+        console.log('🎬 Processing playlist:loaded');
+        // ✅ CORRIGÉ: Mettre à jour Video.js quand playlist est chargée
+        const items = this.playlistManager.getItems();
+        if (items.length > 0) {
+          this.updatePlaylist();
         }
-      };
-
-      this.player = videojs(videoElement, options);
-      
-      if (!this.player) {
-        throw new Error('Failed to create Video.js player');
-      }
-
-      this.setupBasicCallbacks();
-
-      this.player.ready(() => {
-        if (this.isDestroyed) return;
-
-        this.isPlayerReady = true;
-        this.isInitialized = true;
-        this.isInitializing = false;
+        this._triggerRender();
+        break;
         
-        this.setupAdvancedCallbacks();
+      case 'playlist:playbackChanged':
+        // Pas de re-render, juste sync d'état
+        break;
         
-        // Initialisation async des plugins
-        this.initPlugins().then(() => {
-          console.log('MediaPlayer: Initialization complete');
-        }).catch((error) => {
-          console.error('MediaPlayer: Plugin initialization failed:', error);
-          this.props.onError?.(error);
-        });
-      });
-
-    } catch (error) {
-      console.error('MediaPlayer: Failed to initialize Video.js:', error);
-      this.isInitializing = false;
-      this.props.onError?.(error);
+      default:
+        console.log('🎬 MediaPlayer ignoring event:', event);
     }
   }
 
-  initPlugins = async () => {
-    if (this.isDestroyed || !this.player) return;
-
-    try {
-      const [vrResult, playlistResult] = await Promise.allSettled([
-        this.initVRPlugin(),
-        this.initPlaylistPlugin()
-      ]);
-
-      if (vrResult.status === 'rejected') {
-        console.warn('MediaPlayer: VR plugin initialization failed:', vrResult.reason);
+  // ✅ NOUVEAU: Synchronise Video.js avec PlaylistManager (évite boucles infinies)
+  _syncVideoJsToPlaylistManager = (targetIndex) => {
+    if (!this.player || !this._isPlaylistMode()) return;
+    
+    const currentVideoJsIndex = this.player.playlist.currentItem();
+    
+    if (currentVideoJsIndex !== targetIndex) {
+      console.log(`MediaPlayer: Syncing Video.js to PlaylistManager index ${targetIndex}`);
+      // Temporairement désactiver les listeners Video.js pour éviter boucle
+      this.player.off('playlistitem', this.handlePlaylistItem);
+      
+      try {
+        this.player.playlist.currentItem(targetIndex);
+      } catch (error) {
+        console.error('MediaPlayer: Failed to sync Video.js playlist:', error);
+      } finally {
+        // Réactiver les listeners
+        this.player.on('playlistitem', this.handlePlaylistItem);
       }
-
-      if (playlistResult.status === 'rejected') {
-        console.warn('MediaPlayer: Playlist plugin initialization failed:', playlistResult.reason);
-      }
-
-      // Traiter la playlist initiale si disponible
-      if (this.props.playlist && this.props.playlist.length > 0) {
-        await this.updatePlaylist(this.props.playlist);
-      }
-
-    } catch (error) {
-      console.error('MediaPlayer: Plugin initialization error:', error);
-      throw error;
     }
   }
 
   // ============================================================================
-  // PLAYLIST PLUGIN
+  // HELPERS - ✅ MODIFIÉ: Utilise PlaylistManager
+  // ============================================================================
+
+  _hasValidPlaylist = () => {
+    // ✅ CORRIGÉ: Utiliser la propriété computed
+    const items = this.playlistManager?.getItems();
+    return items && items.length > 0;
+  }
+
+  _triggerRender = () => {
+    this.setState(prevState => ({ 
+      renderTrigger: prevState.renderTrigger + 1 
+    }));
+  }
+
+  _isPlaylistMode = () => {
+    return this.player && typeof this.player.playlist === 'function' && this.player.playlist().length > 0;
+  }
+
+  // ============================================================================
+  // PLAYLIST PLUGIN - ✅ MODIFIÉ: Handlers intégrés PlaylistManager
   // ============================================================================
 
   initPlaylistPlugin = async () => {
@@ -238,7 +209,7 @@ class MediaPlayer extends Component {
         throw new Error('Playlist plugin failed to register');
       }
 
-      // Setup event listeners
+      // ✅ MODIFIÉ: Setup event listeners avec intégration PlaylistManager
       this.player.on('playlistchange', this.handlePlaylistChange);
       this.player.on('playlistitem', this.handlePlaylistItem);
       
@@ -248,39 +219,37 @@ class MediaPlayer extends Component {
     }
   }
 
-  updatePlaylist = async (playlist) => {
+  // ✅ SIMPLIFIÉ: Filtrer seulement funscript (API Video.js + funscript)
+  filterForVideojs = (playlist) => {
+    return playlist.map(item => {
+      const { funscript, ...vjsItem } = item;  // Destructuring magic !
+      return vjsItem;
+    });
+  };
+
+  // ✅ MODIFIÉ: Gestion d'état simplifiée
+  updatePlaylist = async () => {
     if (!this.player || !this.isPlayerReady || typeof this.player.playlist !== 'function') {
       return;
     }
 
-    try {
-      if (this.state.lastPlaylistProcessed === playlist) {
-        return;
-      }
-      
-      const vjsPlaylist = this.mediaManager.convertToVjsPlaylist(playlist);
-      
-      if (vjsPlaylist.length === 0) {
-        this.player.playlist([]);
-        this.setState({ 
-          hasPlaylist: false,
-          lastPlaylistProcessed: playlist 
-        });
-        return;
-      }
+    // ✅ TOUJOURS récupérer depuis PlaylistManager
+    const playlistItems = this.playlistManager.getItems();
+    
+    if (!playlistItems || playlistItems.length === 0) {
+      this.player.playlist([]);
+      return;
+    }
 
+    try {
+      console.log('🎬 MediaPlayer.updatePlaylist called with:', playlistItems.length, 'items');
+      
+      const vjsPlaylist = this.filterForVideojs(playlistItems);
       this.player.playlist(vjsPlaylist);
       
       if (this.player.playlist.currentItem() === -1) {
         this.player.playlist.currentItem(0);
       }
-      
-      this.setState({ 
-        hasPlaylist: true,
-        lastPlaylistProcessed: playlist 
-      });
-      
-      this.props.onPlaylistProcessed?.(vjsPlaylist);
       
     } catch (error) {
       console.error('MediaPlayer: Error updating playlist:', error);
@@ -289,43 +258,65 @@ class MediaPlayer extends Component {
   }
 
   // ============================================================================
-  // PLAYLIST EVENT HANDLERS
+  // ✅ MODIFIÉ: PLAYLIST EVENT HANDLERS - Intégration PlaylistManager
   // ============================================================================
 
   handlePlaylistChange = () => {
+    // ✅ NOUVEAU: Trigger re-render pour mettre à jour les buttons
+    this._triggerRender();
   }
 
   handlePlaylistItem = () => {
-    const newIndex = this.player.playlist.currentItem();
+    const newVideoJsIndex = this.player.playlist.currentItem();
     
-    if (newIndex !== this.state.currentPlaylistIndex) {
-      this.setState({ currentPlaylistIndex: newIndex });
+    console.log('MediaPlayer: Video.js playlistitem event:', { newVideoJsIndex });
+    
+    // ✅ NOUVEAU: Synchroniser PlaylistManager avec Video.js
+    if (this.playlistManager && newVideoJsIndex >= 0) {
+      const currentPlaylistIndex = this.playlistManager.getCurrentIndex();
       
-      setTimeout(() => {
-        const currentItem = this.getCurrentPlaylistItem();
-        if (currentItem && currentItem.poster) {
-          this.player.poster(currentItem.poster);
-        }
-      }, 100);
-      
-      const currentItem = this.getCurrentPlaylistItem();
-      this.props.onPlaylistItemChange?.(currentItem, newIndex);
+      if (newVideoJsIndex !== currentPlaylistIndex) {
+        console.log(`MediaPlayer: Syncing PlaylistManager to Video.js index ${newVideoJsIndex}`);
+        
+        // Utiliser PlaylistManager pour changer l'item
+        this.playlistManager.goTo(newVideoJsIndex);
+        // L'événement 'playlist:itemChanged' déclenchera _syncVideoJsToPlaylistManager
+        // et notifiera FunPlayer via handleManagerEvent
+      }
     }
+    
+    // ✅ MODIFIÉ: Gestion poster simplifiée
+    setTimeout(() => {
+      const currentItem = this.getCurrentPlaylistItem();
+      if (currentItem && currentItem.poster) {
+        this.player.poster(currentItem.poster);
+      }
+    }, 100);
+    
+    // ✅ SUPPRIMÉ: Plus d'appel direct this.props.onPlaylistItemChange
+    // La notification se fait maintenant via PlaylistManager → Managers → FunPlayer
   }
 
   // ============================================================================
-  // PLAYLIST PUBLIC API
+  // ✅ MODIFIÉ: PLAYLIST PUBLIC API - Utilise PlaylistManager
   // ============================================================================
 
   getCurrentPlaylistItem = () => {
-    if (!this.state.hasPlaylist || !this.player) return null;
+    if (!this._isPlaylistMode()) return null;
     const index = this.player.playlist.currentItem();
     const playlist = this.player.playlist();
     return index >= 0 && index < playlist.length ? playlist[index] : null;
   }
 
   goToPlaylistItem = (index) => {
-    if (!this.state.hasPlaylist || !this.player) return false;
+    // ✅ MODIFIÉ: Utiliser PlaylistManager au lieu de Video.js directement
+    if (this.playlistManager) {
+      return this.playlistManager.goTo(index);
+      // La synchronisation Video.js se fera via handleManagerEvent
+    }
+    
+    // ✅ FALLBACK: Si PlaylistManager pas disponible, utiliser Video.js directement
+    if (!this._isPlaylistMode()) return false;
     try {
       this.player.playlist.currentItem(index);
       return true;
@@ -336,19 +327,33 @@ class MediaPlayer extends Component {
   }
 
   handleNext = () => {
-    if (this.state.hasPlaylist && this.player) {
+    // ✅ MODIFIÉ: Utiliser PlaylistManager
+    if (this.playlistManager) {
+      this.playlistManager.next();
+    } else if (this._isPlaylistMode()) {
+      // Fallback Video.js
       this.player.playlist.next();
     }
   }
 
   handlePrevious = () => {
-    if (this.state.hasPlaylist && this.player) {
+    // ✅ MODIFIÉ: Utiliser PlaylistManager
+    if (this.playlistManager) {
+      this.playlistManager.previous();
+    } else if (this._isPlaylistMode()) {
+      // Fallback Video.js
       this.player.playlist.previous();
     }
   }
 
   getPlaylistInfo = () => {
-    if (!this.state.hasPlaylist || !this.player) {
+    // ✅ MODIFIÉ: Priorité PlaylistManager, fallback Video.js
+    if (this.playlistManager) {
+      return this.playlistManager.getPlaylistInfo();
+    }
+    
+    // Fallback Video.js original
+    if (!this._isPlaylistMode()) {
       return { hasPlaylist: false, currentIndex: -1, totalItems: 0 };
     }
     
@@ -356,13 +361,14 @@ class MediaPlayer extends Component {
       hasPlaylist: true,
       currentIndex: this.player.playlist.currentItem(),
       totalItems: this.player.playlist().length,
-      canGoPrevious: this.player.playlist.currentItem() > 0,
-      canGoNext: this.player.playlist.currentItem() < this.player.playlist().length - 1
+      // ✅ CORRIGÉ: Noms cohérents avec PlaylistManager
+      canGoNext: this.player.playlist.currentItem() < this.player.playlist().length - 1,
+      canGoPrevious: this.player.playlist.currentItem() > 0
     };
   }
 
   // ============================================================================
-  // PLAYLIST COMPONENTS REGISTRATION
+  // PLAYLIST COMPONENTS REGISTRATION - Inchangé
   // ============================================================================
 
   registerPlaylistComponents = () => {
@@ -416,6 +422,7 @@ class MediaPlayer extends Component {
     videojs.registerComponent('NextButton', NextButton);
   }
 
+  // ✅ MODIFIÉ: Utilise helper _isPlaylistMode et getPlaylistInfo() intégré
   updatePlaylistButtons = () => {
     if (!this.player) return;
 
@@ -426,19 +433,127 @@ class MediaPlayer extends Component {
     const nextBtn = controlBar.getChild('NextButton');
     const playlistInfo = this.getPlaylistInfo();
 
+    console.log('🎬 updatePlaylistButtons - playlistInfo:', playlistInfo);
+
     if (prevBtn) {
+      // ✅ CORRIGÉ: Utiliser les bons noms de propriétés
       prevBtn.el().disabled = !playlistInfo.canGoPrevious;
       prevBtn.el().style.opacity = playlistInfo.canGoPrevious ? '1' : '0.3';
+      console.log('🎬 Previous button - canGoPrevious:', playlistInfo.canGoPrevious, 'disabled:', prevBtn.el().disabled);
     }
 
     if (nextBtn) {
+      // ✅ CORRIGÉ: Utiliser les bons noms de propriétés
       nextBtn.el().disabled = !playlistInfo.canGoNext;
       nextBtn.el().style.opacity = playlistInfo.canGoNext ? '1' : '0.3';
+      console.log('🎬 Next button - canGoNext:', playlistInfo.canGoNext, 'disabled:', nextBtn.el().disabled);
     }
   }
 
   // ============================================================================
-  // VR PLUGIN
+  // INITIALIZATION - ✅ MODIFIÉ: Gestion d'erreur améliorée
+  // ============================================================================
+
+  initPlayer = async () => {
+    if (this.isDestroyed || this.isInitialized || this.isInitializing) {
+      return;
+    }
+
+    if (!this.videoRef?.current) {
+      console.error('MediaPlayer: Video element not available');
+      return;
+    }
+
+    this.isInitializing = true;
+
+    try {
+      const videoElement = this.videoRef.current;
+      this.registerPlaylistComponents();
+
+      const options = {
+        controls: true,
+        responsive: true,
+        fluid: true,
+        playsinline: true,
+        preload: 'metadata',
+        techOrder: ['html5'],
+        html5: {
+          vhs: {
+            overrideNative: false
+          }
+        },
+        controlBar: {
+          children: [
+            'playToggle', 'currentTimeDisplay', 'timeDivider', 
+            'durationDisplay', 'progressControl', 'PreviousButton', 
+            'NextButton', 'volumePanel', 'fullscreenToggle'
+          ]
+        }
+      };
+
+      this.player = videojs(videoElement, options);
+      
+      if (!this.player) {
+        throw new Error('Failed to create Video.js player');
+      }
+
+      this.setupBasicCallbacks();
+
+      this.player.ready(() => {
+        if (this.isDestroyed) return;
+
+        this.isPlayerReady = true;
+        this.isInitialized = true;
+        this.isInitializing = false;
+        
+        this.setupAdvancedCallbacks();
+        
+        this.initPlugins().then(() => {
+          console.log('MediaPlayer: Initialization complete');
+          this._triggerRender(); // ✅ NOUVEAU: Trigger re-render après init
+        }).catch((error) => {
+          console.error('MediaPlayer: Plugin initialization failed:', error);
+          this.props.onError?.(error);
+        });
+      });
+
+    } catch (error) {
+      console.error('MediaPlayer: Failed to initialize Video.js:', error);
+      this.isInitializing = false;
+      this.props.onError?.(error);
+    }
+  }
+
+  initPlugins = async () => {
+    if (this.isDestroyed || !this.player) return;
+
+    try {
+      const [vrResult, playlistResult] = await Promise.allSettled([
+        this.initVRPlugin(),
+        this.initPlaylistPlugin()
+      ]);
+
+      if (vrResult.status === 'rejected') {
+        console.warn('MediaPlayer: VR plugin initialization failed:', vrResult.reason);
+      }
+
+      if (playlistResult.status === 'rejected') {
+        console.warn('MediaPlayer: Playlist plugin initialization failed:', playlistResult.reason);
+      }
+
+      // Traiter la playlist initiale si disponible
+      if (this._hasValidPlaylist()) {
+        await this.updatePlaylist();
+      }
+
+    } catch (error) {
+      console.error('MediaPlayer: Plugin initialization error:', error);
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // VR PLUGIN - Inchangé
   // ============================================================================
   
   initVRPlugin = async () => {
@@ -469,6 +584,7 @@ class MediaPlayer extends Component {
       console.warn('MediaPlayer: VR plugin initialization failed:', error);
     }
   }
+
   configureVRPlugin = () => {
     if (!this.player || this.isDestroyed) return;
     
@@ -479,8 +595,8 @@ class MediaPlayer extends Component {
       
       this.player.vr({
         projection: 'AUTO',
-        debug: false, // ✅ MODIFIÉ: Réduire les logs
-        forceCardboard: false // ✅ MODIFIÉ: Plus conservateur
+        debug: false,
+        forceCardboard: false
       });
       
       console.log('MediaPlayer: VR plugin configured');
@@ -490,7 +606,7 @@ class MediaPlayer extends Component {
   }
 
   // ============================================================================
-  // CALLBACKS
+  // CALLBACKS - ✅ MODIFIÉ: Trigger re-render quand approprié
   // ============================================================================
 
   setupBasicCallbacks = () => {
@@ -508,9 +624,10 @@ class MediaPlayer extends Component {
       const duration = this.player.duration() || 0;
       this.props.onLoadEnd?.({ 
         duration, 
-        type: this.hasPlaylist ? 'playlist' : 'media' 
+        type: this._isPlaylistMode() ? 'playlist' : 'media' 
       });
       this.updatePlaylistButtons();
+      this._triggerRender(); // ✅ NOUVEAU: Re-render après load
     });
 
     this.player.on('play', () => {
@@ -540,7 +657,7 @@ class MediaPlayer extends Component {
   }
 
   // ============================================================================
-  // CLEANUP
+  // ✅ MODIFIÉ: CLEANUP - Reset state simplifié + cleanup listeners
   // ============================================================================
 
   cleanup = () => {
@@ -548,12 +665,10 @@ class MediaPlayer extends Component {
     this.isInitialized = false;
     this.isInitializing = false;
     
-    if (this.mediaManager) {
-      try {
-        this.mediaManager.cleanup();
-      } catch (error) {
-        console.error('MediaPlayer: MediaManager cleanup error:', error);
-      }
+    // ✅ NOUVEAU: Cleanup listeners managers
+    if (this.managersListener) {
+      this.managersListener();
+      this.managersListener = null;
     }
     
     if (this.player) {
@@ -572,17 +687,16 @@ class MediaPlayer extends Component {
         this.isPlayerReady = false;
         this.initRetries = 0;
         
+        // ✅ MODIFIÉ: Reset state encore plus simplifié
         this.setState({
-          currentPlaylistIndex: -1,
-          hasPlaylist: false,
-          lastPlaylistProcessed: null
+          renderTrigger: 0
         });
       }
     }
   }
 
   // ============================================================================
-  // PUBLIC API
+  // PUBLIC API - ✅ MODIFIÉ: Utilise helper _isPlaylistMode
   // ============================================================================
 
   play = () => this.player?.play()
@@ -596,29 +710,29 @@ class MediaPlayer extends Component {
   getDuration = () => this.player?.duration() || 0
   isPlaying = () => this.player ? !this.player.paused() : false
 
-  // API Playlist
+  // ✅ MODIFIÉ: API Playlist utilise les méthodes intégrées PlaylistManager
   nextItem = () => this.handleNext()
   previousItem = () => this.handlePrevious()
   goToItem = (index) => this.goToPlaylistItem(index)
   getCurrentItem = () => this.getCurrentPlaylistItem()
-  getPlaylist = () => this.state.hasPlaylist ? this.player.playlist() : []
+  getPlaylist = () => this._isPlaylistMode() ? this.player.playlist() : []
 
   getState = () => ({
     currentTime: this.getTime(),
     duration: this.getDuration(),
     isPlaying: this.isPlaying(),
-    mediaType: this.state.hasPlaylist ? 'playlist' : 'media',
-    playlistInfo: this.getPlaylistInfo()
+    mediaType: this._isPlaylistMode() ? 'playlist' : 'media',
+    playlistInfo: this.getPlaylistInfo() // Utilise la méthode intégrée
   })
 
   // ============================================================================
-  // RENDER
+  // RENDER - ✅ MODIFIÉ: Utilise helper _hasValidPlaylist
   // ============================================================================
 
   render() {
-    const { className = '', playlist } = this.props;
+    const { className = '' } = this.props;
     
-    const hasContent = playlist && playlist.length > 0;
+    const hasContent = this._hasValidPlaylist();
     
     return (
       <div className={`media-player ${className}`}>

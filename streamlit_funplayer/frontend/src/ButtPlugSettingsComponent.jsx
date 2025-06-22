@@ -1,117 +1,132 @@
 import React, { Component } from 'react';
+import managers from './Managers';
 
+/**
+ * ButtPlugSettingsComponent - ✅ REFACTORISÉ: Réactif aux événements
+ * Plus de props redondantes, accès direct aux managers + événements
+ */
 class ButtPlugSettingsComponent extends Component {
   constructor(props) {
     super(props);
+    
     this.state = {
-      // ✅ SEULS ÉTATS UI - Pas de données métier
-      isAutoConnecting: false
+      isAutoConnecting: false,
+      renderTrigger: 0  // ✅ NOUVEAU: Trigger pour re-render
     };
+    
+    this.managersListener = null;
+  }
+
+  componentDidMount() {
+    // ✅ NOUVEAU: Écouter les événements pour re-render
+    this.managersListener = managers.addListener(this.handleManagerEvent);
+  }
+
+  componentWillUnmount() {
+    if (this.managersListener) {
+      this.managersListener();
+    }
   }
 
   // ============================================================================
-  // GETTERS DIRECTS DEPUIS LE MANAGER (stateless)
+  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS
   // ============================================================================
 
-  getButtplugState = () => {
-    const manager = this.props.buttplugRef?.current;
-    return {
-      isConnected: manager?.isConnected || false,
-      devices: manager?.getDevices() || [],
-      selectedDevice: manager?.getSelected(),
-      capabilities: manager?.getCapabilities(),
-      isScanning: manager?.isScanning || false
-    };
+  handleManagerEvent = (event, data) => {
+    // ✅ NOUVEAU: Re-render sur événements qui impactent ce composant
+    const eventsToReact = [
+      'buttplug:connection',     // État de connexion changé
+      'buttplug:device',         // Device sélectionné changé
+      'funscript:load',          // Funscript chargé (impact les boutons)
+      'funscript:channels',      // Canaux changés (impact les boutons)
+      'managers:autoConnect'     // AutoConnect terminé
+    ];
+    
+    if (eventsToReact.some(e => event.startsWith(e.split(':')[0]))) {
+      // ✅ Trigger re-render via setState
+      this.setState(prevState => ({ 
+        renderTrigger: prevState.renderTrigger + 1 
+      }));
+      
+      // ✅ NOUVEAU: Gérer la fin d'autoConnect
+      if (event === 'managers:autoConnect') {
+        this.setState({ isAutoConnecting: false });
+      }
+    }
   }
 
-  getFunscriptState = () => {
-    const manager = this.props.funscriptManagerRef?.current;
-    return {
-      channels: manager?.getChannels() || [],
-      duration: manager?.getDuration() || 0
-    };
+  // ============================================================================
+  // ✅ NOUVEAU: GETTERS - Accès direct aux managers (remplace les props)
+  // ============================================================================
+
+  getButtPlugStatus = () => {
+    // ✅ Accès direct via la propriété computed du manager
+    return this.buttplug?.getStatus() || { isConnected: false };
+  }
+
+  getFunscriptChannels = () => {
+    const funscript = managers.getFunscript();
+    return funscript?.getChannels() || [];
+  }
+
+  getDevices = () => {
+    return this.buttplug?.getDevices() || [];
+  }
+
+  getSelectedDevice = () => {
+    return this.buttplug?.getSelected() || null;
+  }
+
+  // ✅ NOUVEAU: Propriété computed pour buttplug (avec cache)
+  get buttplug() {
+    return managers.buttplug;
   }
 
   // ============================================================================
-  // ACTIONS SUR LE MANAGER (stateless)
+  // ✅ MODIFIÉ: ACTIONS - Appels directs au lieu de callbacks props
   // ============================================================================
+
+
 
   handleAutoConnect = async () => {
-    const manager = this.props.buttplugRef?.current;
-    if (!manager || this.state.isAutoConnecting) return;
+    if (this.state.isAutoConnecting) return;
 
     this.setState({ isAutoConnecting: true });
-    this.props.onStatusChange?.('Connecting to Intiface...');
     
     try {
-      // 1. Connect to Intiface
-      const connected = await manager.connect();
-      if (!connected) {
-        this.props.onStatusChange?.('Failed to connect to Intiface');
-        return;
-      }
-      
-      this.props.onStatusChange?.('Scanning for devices...');
-      
-      // 2. Scan for devices (3 secondes)
-      const devices = await manager.scan(3000);
-      if (!devices || devices.length === 0) {
-        this.props.onStatusChange?.('No devices found');
-        return;
-      }
-      
-      this.props.onStatusChange?.(`Found ${devices.length} device(s), selecting first...`);
-      
-      // 3. Auto-select first device
-      const selectSuccess = await manager.selectDevice(devices[0].index);
-      if (!selectSuccess) {
-        this.props.onStatusChange?.('Failed to select device');
-        return;
-      }
-      
-      // 4. Trigger auto-map channels (via callback)
-      this.props.onAutoConnect?.();
-      
-      const deviceName = devices[0].name || 'Unknown device';
-      this.props.onStatusChange?.(`Connected to ${deviceName} and auto-mapped channels`);
-      
-      this.forceUpdate(); // Trigger re-render
+      // ✅ MODIFIÉ: Appel direct à managers au lieu de prop callback
+      await managers.autoConnect(3000);
+      // ✅ L'événement 'managers:autoConnect' gérera le setState isAutoConnecting
       
     } catch (error) {
       console.error('AutoConnect failed:', error);
-      this.props.onStatusChange?.('AutoConnect failed');
-    } finally {
       this.setState({ isAutoConnecting: false });
     }
   }
 
   handleDisconnect = async () => {
-    const manager = this.props.buttplugRef?.current;
-    if (!manager) return;
-
     try {
-      await manager.disconnect();
-      this.forceUpdate(); // Trigger re-render
-      this.props.onStatusChange?.('Disconnected from Intiface');
+      // ✅ MODIFIÉ: Accès direct via propriété computed
+      if (this.buttplug) {
+        await this.buttplug.disconnect();
+        // ✅ L'événement 'buttplug:connection' sera déclenché automatiquement
+      }
     } catch (error) {
       console.error('Disconnect failed:', error);
     }
   }
 
   handleDeviceChange = async (deviceIndex) => {
-    const manager = this.props.buttplugRef?.current;
-    if (!manager) return;
-
     try {
-      const success = await manager.selectDevice(deviceIndex);
-      if (success) {
-        this.forceUpdate(); // Trigger re-render
-        this.props.onDeviceSelect?.(deviceIndex);
+      // ✅ MODIFIÉ: Accès direct via propriété computed  
+      if (this.buttplug) {
+        const numericIndex = deviceIndex === '' ? null : parseInt(deviceIndex);
+        const success = this.buttplug.selectDevice(numericIndex);
         
-        if (deviceIndex !== null) {
-          const devices = this.getButtplugState().devices;
-          const device = devices.find(d => d.index === deviceIndex);
-          this.props.onStatusChange?.(`Selected: ${device?.name || 'Unknown device'}`);
+        if (success && numericIndex !== null) {
+          // Auto-map après sélection
+          managers.autoMapChannels();
+          // ✅ Les événements 'buttplug:device' et 'managers:autoMap' seront déclenchés
         }
       }
     } catch (error) {
@@ -120,16 +135,23 @@ class ButtPlugSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // RENDER MAIN BAR (Layout identique à l'ancienne barre principale)
+  // ✅ MODIFIÉ: RENDER - Utilise les getters au lieu des props
   // ============================================================================
 
   render() {
-    const { isConnected, selectedDevice, devices } = this.getButtplugState();
-    const { channels } = this.getFunscriptState();
-    const { isAutoConnecting } = this.state;
+    const { 
+      onToggleSettings, 
+      isSettingsExpanded 
+    } = this.props;
     
-    // ✅ MODIFIÉ: Toujours afficher, même sans funscript
-    // Adapte juste les contrôles selon la présence de channels
+    // ✅ MODIFIÉ: Données récupérées via getters au lieu de props
+    const { isAutoConnecting } = this.state;
+    const buttplugStatus = this.getButtPlugStatus();
+    const funscriptChannels = this.getFunscriptChannels();
+    const devices = this.getDevices();
+    const selectedDevice = this.getSelectedDevice();
+    
+    const isConnected = buttplugStatus?.isConnected || false;
     
     return (
       <div className="fp-section-compact fp-layout-horizontal">
@@ -142,8 +164,7 @@ class ButtPlugSettingsComponent extends Component {
           <span className="fp-label fp-device-name">
             {selectedDevice?.name || 'No device'}
           </span>
-          {/* ✅ AJOUT: Indication channels même sans funscript */}
-          {channels.length === 0 && (
+          {funscriptChannels.length === 0 && (
             <span className="fp-unit" style={{ opacity: 0.5 }}>
               No haptic
             </span>
@@ -153,13 +174,13 @@ class ButtPlugSettingsComponent extends Component {
         {/* Actions */}
         <div className="fp-layout-row fp-no-shrink">
           
-          {/* Connect/Disconnect - toujours présent */}
+          {/* Connect/Disconnect */}
           {!isConnected ? (
             <button 
               className="fp-btn fp-btn-primary"
               onClick={this.handleAutoConnect}
-              disabled={isAutoConnecting || channels.length === 0}
-              title={channels.length === 0 ? "Load funscript first" : "Connect to Intiface Central"}
+              disabled={isAutoConnecting || funscriptChannels.length === 0}
+              title={funscriptChannels.length === 0 ? "Load funscript first" : "Connect to Intiface Central"}
             >
               {isAutoConnecting ? (
                 <>🔄 Connecting...</>
@@ -176,16 +197,13 @@ class ButtPlugSettingsComponent extends Component {
             </button>
           )}
           
-          {/* Device selector - toujours présent */}
+          {/* Device selector */}
           <select
             className="fp-input fp-select fp-min-width"
             value={selectedDevice?.index ?? ''}
-            onChange={(e) => {
-              const value = e.target.value === '' ? null : parseInt(e.target.value);
-              this.handleDeviceChange(value);
-            }}
-            disabled={channels.length === 0}
-            title={channels.length === 0 ? "Load funscript first" : "Select device"}
+            onChange={(e) => this.handleDeviceChange(e.target.value)}
+            disabled={funscriptChannels.length === 0}
+            title={funscriptChannels.length === 0 ? "Load funscript first" : "Select device"}
           >
             <option value="">Virtual</option>
             {devices.map(device => (
@@ -195,13 +213,13 @@ class ButtPlugSettingsComponent extends Component {
             ))}
           </select>
           
-          {/* Settings toggle - conditionnel sur la présence de channels */}
-          {this.props.onToggleSettings && channels.length > 0 && (
+          {/* Settings toggle */}
+          {onToggleSettings && funscriptChannels.length > 0 && (
             <button 
               className="fp-btn fp-btn-ghost fp-chevron"
-              onClick={this.props.onToggleSettings}
+              onClick={onToggleSettings}
             >
-              {this.props.isSettingsExpanded ? '▲' : '▼'}
+              {isSettingsExpanded ? '▲' : '▼'}
             </button>
           )}
           

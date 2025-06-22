@@ -470,27 +470,20 @@
 }
 
 .vjs-theme-funplayer .vjs-big-play-button {
-  background: rgba(255, 75, 75, 0.8);
-  border-color: var(--primary-color);
+  background: var(--primary-color);
+  border-color: var(--border-color);
 }
 
 /* Contrôles playlist dans Video.js */
 .vjs-theme-funplayer .vjs-previous-button,
 .vjs-theme-funplayer .vjs-next-button {
-  background: var(--primary-color);
   font-size: 1.2em;
   width: 2.5em;
 }
 
 .vjs-theme-funplayer .vjs-previous-button:disabled,
 .vjs-theme-funplayer .vjs-next-button:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
-}
-
-.vjs-theme-funplayer .vjs-previous-button:hover:not(:disabled),
-.vjs-theme-funplayer .vjs-next-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.2);
+  opacity: 0.5;
 }
 
 /* ============================================================================

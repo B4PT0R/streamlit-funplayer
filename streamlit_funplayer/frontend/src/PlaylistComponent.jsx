@@ -1,82 +1,90 @@
 import React, { Component } from 'react';
+import managers from './Managers'; 
 
 /**
- * PlaylistComponent - UI d'affichage de playlist simplifié
- * Ne gère plus la logique métier, juste l'affichage et les clics
- * Communique avec MediaPlayer via les méthodes publiques
+ * PlaylistComponent - ✅ OPTIMISÉ: Pattern cohérent + state simplifié
+ * Utilise directement les props + renderTrigger pour cohérence
  */
 class PlaylistComponent extends Component {
   constructor(props) {
     super(props);
+    this.playlist = managers.getPlaylist();
     this.state = {
-      // ✅ NOUVEAU: État minimal, juste pour l'UI
-      currentIndex: -1,
-      playlist: []
+      renderTrigger: 0
     };
   }
 
-  componentDidMount() {
-    this.updateFromProps();
+  componentDidMount() {    
+    // ✅ NOUVEAU: Utiliser le système d'événements Managers
+    this.managersListener = managers.addListener(this.handleManagerEvent);
+    this._triggerRenderIfNeeded();
   }
 
-  componentDidUpdate(prevProps) {
-    // ✅ MODIFIÉ: Comparaison plus précise pour éviter les re-renders inutiles
-    const playlistChanged = prevProps.playlist !== this.props.playlist;
-    const indexChanged = prevProps.currentIndex !== this.props.currentIndex;
-    
-    if (playlistChanged || indexChanged) {
-      this.updateFromProps();
+  componentWillUnmount() {
+    // ✅ MODIFIÉ: Cleanup du listener managers
+    if (this.managersListener) {
+      this.managersListener();
     }
+  }
+
+  // ✅ NOUVEAU: Handler unifié via Managers
+  handleManagerEvent = (event, data) => {
+    if (event === 'playlist:loaded' || event === 'playlist:itemChanged') {
+      this.handlePlaylistRefresh();
+    }
+  }
+
+  // ✅ CONSERVÉ: handlePlaylistRefresh reste identique
+  handlePlaylistRefresh = () => {
+    this._triggerRenderIfNeeded();
+    if (this.props.onResize) {
+      this.props.onResize();
+    }
+  };
+
+  // ============================================================================
+  // ✅ NOUVEAU: HELPERS POUR PATTERN COHÉRENT
+  // ============================================================================
+
+  _triggerRender = () => {
+    this.setState(prevState => ({ 
+      renderTrigger: prevState.renderTrigger + 1 
+    }));
+  }
+
+  _triggerRenderIfNeeded = () => {
+    // ✅ OPTIMISATION: Ne re-render que si on a vraiment du contenu à afficher
+    const playlist = this.getPlaylist();
+    if (playlist.length > 1) {
+      this._triggerRender();
+    }
+  }
+
+  // ✅ NOUVEAU: Getters pour accès direct aux données (pas de state redondant)
+  getPlaylist = () => this.playlist.getItems();
+
+  getCurrentIndex = () => this.playlist.getCurrentIndex();
+
+  shouldShowPlaylist = () => {
+    const playlist = this.getPlaylist();
+    return playlist.length > 1;
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: SYNCHRONISATION AVEC FUNPLAYER/MEDIAPLAYER
+  // ✅ MODIFIÉ: ACTIONS - Communication simplifiée
   // ============================================================================
 
-  updateFromProps = () => {
-    const { playlist, currentIndex, mediaPlayerRef } = this.props;
-    
-    let resolvedIndex = currentIndex || -1;
-    
-    // ✅ NOUVEAU: Fallback - demander l'index actuel au MediaPlayer si pas défini
-    if (resolvedIndex === -1 && mediaPlayerRef?.current) {
-      const playlistInfo = mediaPlayerRef.current.getPlaylistInfo();
-      if (playlistInfo && playlistInfo.currentIndex >= 0) {
-        resolvedIndex = playlistInfo.currentIndex;
-      }
-    }
-    
-    // ✅ NOUVEAU: Éviter setState inutile si les valeurs n'ont pas changé
-    const newPlaylist = playlist || [];
-    if (this.state.playlist !== newPlaylist || this.state.currentIndex !== resolvedIndex) {
-      this.setState({
-        playlist: newPlaylist,
-        currentIndex: resolvedIndex
-      });
-    }
-  }
-
-  // ✅ NOUVEAU: Communication via MediaPlayer plutôt que callbacks directs
   handleItemClick = (index) => {
-    const { mediaPlayerRef } = this.props;
     
-    if (!mediaPlayerRef?.current) {
-      console.warn('PlaylistComponent: No MediaPlayer reference');
-      return;
-    }
-
-    // ✅ NOUVEAU: Utiliser l'API playlist du MediaPlayer
-    const success = mediaPlayerRef.current.goToItem(index);
-    
+    const success = this.playlist.goTo(index);
+        
     if (!success) {
       console.error('PlaylistComponent: Failed to go to item', index);
     }
-    
-    // ✅ NOUVEAU: Pas besoin de callback - FunPlayer sera notifié via onPlaylistItemChange
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GÉNÉRATION DE MINIATURES FALLBACK - ✅ CORRIGÉ: Sans btoa()
+  // ✅ MODIFIÉ: MÉTADONNÉES - Utilise les getters
   // ============================================================================
 
   generateFallbackThumbnail = (item, index) => {
@@ -84,51 +92,64 @@ class PlaylistComponent extends Component {
     let icon = '📄';
     let bgColor = '#6B7280';
 
-    if (item.media) {
-      const mediaLower = item.media.toLowerCase();
-      if (mediaLower.includes('audio') || 
-          ['.mp3', '.wav', '.ogg', '.m4a', '.aac'].some(ext => mediaLower.includes(ext))) {
+    // ✅ Utiliser sources au lieu de media (format Video.js étendu)
+    if (item.sources && item.sources.length > 0) {
+      const firstSource = item.sources[0];
+      const srcLower = firstSource.src.toLowerCase();
+      const typeLower = (firstSource.type || '').toLowerCase();
+      
+      // Vérifier par type MIME d'abord
+      if (typeLower.startsWith('audio/') || 
+          ['.mp3', '.wav', '.ogg', '.m4a', '.aac'].some(ext => srcLower.includes(ext))) {
         icon = '🎵';
         bgColor = '#10B981';
+      } else if (typeLower.startsWith('video/') || 
+                 ['.mp4', '.webm', '.mov', '.avi', '.mkv'].some(ext => srcLower.includes(ext))) {
+        icon = '🎥';
+        bgColor = '#3B82F6';
       }
     } else if (item.funscript) {
+      // Funscript seul (pas de sources)
       icon = '🎮';
       bgColor = '#8B5CF6';
     } else if (item.duration) {
+      // Timeline mode
       icon = '⏱️';
       bgColor = '#F59E0B';
     }
 
-    // ✅ MODIFIÉ: Créer un SVG sans btoa() pour éviter les erreurs Unicode
+    // ✅ Créer un SVG sans btoa() pour éviter les erreurs Unicode
     const svg = `<svg width="48" height="32" xmlns="http://www.w3.org/2000/svg"><rect width="48" height="32" fill="${bgColor}" rx="4"/><text x="24" y="20" text-anchor="middle" fill="white" font-size="16" font-family="system-ui">${icon}</text></svg>`;
     
-    // ✅ MODIFIÉ: Encoder manuellement sans btoa()
+    // ✅ Encoder manuellement sans btoa()
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   }
 
-  // ============================================================================
-  // ✅ SIMPLIFIÉ: MÉTHODES UTILITAIRES (plus de logique métier)
-  // ============================================================================
-
   getItemTitle = (item, index) => {
-    // ✅ PRIORITÉ: Titre explicite
+    // ✅ Priorité name > title (format Video.js étendu)
+    if (item.name) {
+      return item.name;
+    }
+    
     if (item.title) {
       return item.title;
     }
 
-    // ✅ FALLBACK: Extraire du nom de fichier media
-    if (item.media) {
-      if (item.media.startsWith('data:')) {
-        const mimeMatch = item.media.match(/data:([^;]+)/);
+    // ✅ Extraire du nom de fichier sources
+    if (item.sources && item.sources.length > 0) {
+      const firstSource = item.sources[0];
+      
+      if (firstSource.src.startsWith('data:')) {
+        const mimeMatch = firstSource.src.match(/data:([^;]+)/);
         const mimeType = mimeMatch ? mimeMatch[1] : 'unknown';
         return `Uploaded ${mimeType.split('/')[0]}`;
       }
 
-      const filename = item.media.split('/').pop().split('.')[0];
+      const filename = firstSource.src.split('/').pop().split('.')[0];
       return filename || `Item ${index + 1}`;
     }
 
-    // ✅ FALLBACK: Extraire du nom de fichier funscript
+    // ✅ Extraire du nom de fichier funscript
     if (item.funscript && typeof item.funscript === 'string') {
       if (item.funscript.startsWith('data:')) {
         return `Uploaded funscript`;
@@ -143,15 +164,39 @@ class PlaylistComponent extends Component {
   getItemInfo = (item) => {
     const info = [];
 
-    // Type de media explicite
-    if (item.media_type) {
-      info.push(item.media_type.toUpperCase());
-    } else if (item.media) {
-      if (item.media.startsWith('data:')) {
-        info.push('UPLOADED');
+    // ✅ Détecter le type depuis sources
+    if (item.sources && item.sources.length > 0) {
+      const firstSource = item.sources[0];
+      
+      // Type de media explicite depuis le type MIME
+      if (firstSource.type) {
+        const mimeType = firstSource.type.toLowerCase();
+        if (mimeType.startsWith('video/')) {
+          info.push('VIDEO');
+        } else if (mimeType.startsWith('audio/')) {
+          info.push('AUDIO');
+        } else if (mimeType.includes('mpegurl')) {
+          info.push('HLS');
+        } else if (mimeType.includes('dash')) {
+          info.push('DASH');
+        } else {
+          info.push('MEDIA');
+        }
       } else {
-        const ext = item.media.split('.').pop().toUpperCase();
-        info.push(ext);
+        // Fallback : détecter par extension
+        if (firstSource.src.startsWith('data:')) {
+          info.push('UPLOADED');
+        } else {
+          const ext = firstSource.src.split('.').pop().toUpperCase();
+          info.push(ext);
+        }
+      }
+    } else {
+      // Pas de sources = timeline/haptic mode
+      if (item.duration) {
+        info.push('TIMELINE');
+      } else {
+        info.push('HAPTIC');
       }
     }
 
@@ -171,14 +216,16 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ SIMPLIFIÉ: RENDER (pas de logique métier)
+  // ✅ MODIFIÉ: RENDER - Utilise les getters au lieu du state
   // ============================================================================
 
   render() {
-    const { playlist, currentIndex } = this.state;
+    // ✅ MODIFIÉ: Utilise les getters au lieu du state
+    const playlist = this.getPlaylist();
+    const currentIndex = this.getCurrentIndex();
 
-    // ✅ NOUVEAU: Toujours afficher si playlist > 1, même en mode simple
-    if (!playlist || playlist.length <= 1) {
+    // ✅ OPTIMISATION: Toujours afficher si playlist > 1
+    if (!this.shouldShowPlaylist()) {
       return null;
     }
 
@@ -197,10 +244,10 @@ class PlaylistComponent extends Component {
               key={index}
               className={`fp-playlist-item ${index === currentIndex ? 'active' : ''}`}
               onClick={() => this.handleItemClick(index)}
-              title={item.media_info || this.getItemTitle(item, index)}
+              title={item.description || this.getItemTitle(item, index)}
             >
               
-              {/* ✅ NOUVEAU: Miniature avec fallback intelligent */}
+              {/* ✅ Miniature avec fallback intelligent */}
               <div className="fp-item-thumbnail">
                 <img 
                   src={item.poster || this.generateFallbackThumbnail(item, index)} 

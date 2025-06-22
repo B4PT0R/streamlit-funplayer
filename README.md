@@ -6,7 +6,7 @@ A comprehensive media player component for synchronized audio/video and haptic p
 
 ### 🎥 Universal Media Support
 - **Video playback**: Standard 2D video formats (MP4, WebM, MOV, AVI)
-- **VR video support**: 360°/180° spherical video with A-Frame integration
+- **VR video support**:  3D SBS/180°/360° video with A-Frame integration
 - **Audio playback**: MP3, WAV, OGG, M4A, AAC formats
 - **Timeline-only mode**: Haptic-only playback without media (generates silent audio)
 - **Playlist support**: Multiple items with automatic progression and manual navigation
@@ -16,7 +16,7 @@ A comprehensive media player component for synchronized audio/video and haptic p
 - **Multi-channel funscripts**: Support for complex scripts with multiple actuator channels (pos, vibrate, rotate, linear, etc.)
 - **Intelligent channel mapping**: Automatic detection and mapping of funscript channels to device actuators
 - **Per-channel configuration**: Individual scale, time offset, range, and invert settings for each channel
-- **High-frequency updates**: Configurable refresh rates from 30Hz to 200Hz for smooth haptic feedback
+- **High-frequency updates**: Configurable refresh rates from 10Hz to 120Hz for smooth haptic feedback
 - **Real-time interpolation**: Smooth value transitions between funscript keyframes
 
 ### ⚙️ Professional Configuration
@@ -87,7 +87,6 @@ funplayer(
 funplayer(
     playlist=[{
         'funscript': 'script.funscript',
-        'duration': 120,  # 2 minutes
         'title': 'Pure Haptic'
     }]
 )
@@ -107,7 +106,6 @@ funplayer(
         },
         {
             'funscript': 'haptic_only.funscript',
-            'duration': 60,
             'title': 'Haptic Only'
         }
     ]
@@ -178,24 +176,8 @@ funplayer(playlist=[{
 import streamlit as st
 import json
 import base64
-from streamlit_funplayer import funplayer
+from streamlit_funplayer import funplayer, file_to_data_url
 
-def file_to_data_url(uploaded_file):
-    """Convert uploaded file to data URL for browser compatibility"""
-    if not uploaded_file:
-        return None
-    
-    content = uploaded_file.getvalue()
-    extension = uploaded_file.name.split('.')[-1].lower()
-    
-    mime_types = {
-        'mp4': 'video/mp4', 'webm': 'video/webm',
-        'mp3': 'audio/mpeg', 'wav': 'audio/wav'
-    }
-    
-    mime_type = mime_types.get(extension, 'application/octet-stream')
-    b64_content = base64.b64encode(content).decode('utf-8')
-    return f"data:{mime_type};base64,{b64_content}"
 
 # UI
 st.title("🎮 Upload & Play")
@@ -214,7 +196,7 @@ if media_file or funscript_file:
     playlist_item = {}
     
     if media_file:
-        playlist_item['media'] = file_to_data_url(media_file)
+        playlist_item['media'] = file_to_data_url(media_file) # converts file or BytesIO to base64 data url
         playlist_item['title'] = media_file.name
         
     if funscript_file:
@@ -269,7 +251,7 @@ funplayer(
 │                StreamlitFunPlayer (Wrapper)                     │
 │              • Theme integration                                │
 │              • Props conversion                                 │
-│              • Streamlit lifecycle                             │
+│              • Streamlit lifecycle                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,12 +1,13 @@
 import React, { Component } from 'react';
 import MediaPlayer from './MediaPlayer';
-import ButtPlugManager from './ButtPlugManager';
-import FunscriptManager from './FunscriptManager';
 import PlaylistComponent from './PlaylistComponent';
 import HapticSettingsComponent from './HapticSettingsComponent';
 import HapticVisualizerComponent from './HapticVisualizerComponent';
-import MediaManager from './MediaManager';
+import managers from './Managers';
 
+/**
+ * FunPlayer - ✅ OPTIMISÉ: Accès simplifié aux managers + événements étendus
+ */
 class FunPlayer extends Component {
   constructor(props) {
     super(props);
@@ -17,37 +18,28 @@ class FunPlayer extends Component {
       updateRate: 60,
       isPlaying: false,
       currentActuatorData: new Map(),
-      showVisualizer: false,
+      showVisualizer: true,
       showDebug: false,
-      // ✅ NOUVEAU: État playlist simplifié
-      currentPlaylistIndex: -1,
-      playlistItems: []
+      renderTrigger: 0  // ✅ Pattern cohérent avec autres composants
+      // ✅ SUPPRIMÉ: Plus d'état playlist (currentPlaylistIndex, playlistItems)
     };
     
-    // Managers
-    this.buttplugRef = React.createRef();
-    this.funscriptRef = React.createRef();
     this.mediaPlayerRef = React.createRef();
     
-    // ✅ AJOUT: Flag pour éviter double initialisation
-    this.isInitialized = false;
-    this.isInitializing = false;
-
     // Haptic loop
     this.hapticIntervalId = null;
     this.expectedHapticTime = 0;
+    this.hapticTime = 0;
+    this.lastMediaTime = 0;
+    this.lastSyncTime = 0;
+    
+    // Event listener cleanup
+    this.managersListener = null;
   }
 
   componentDidMount() {
-    // ✅ FIX: S'assurer qu'on repart sur des bases saines
-    this.isInitialized = false;
-    this.isInitializing = false;
-    
-    // Vérifier qu'on n'initialise qu'une seule fois
-    if (!this.isInitialized && !this.isInitializing) {
-      this.applyTheme();
-      this.initializeManagers();
-    }
+    this.applyTheme();
+    this.initializeComponent();
   }
 
   componentDidUpdate(prevProps) {
@@ -55,239 +47,238 @@ class FunPlayer extends Component {
       this.applyTheme();
     }
     
-    // Seulement si vraiment différent et initialisé
-    if (this.isInitialized && prevProps.playlist !== this.props.playlist) {
-      this.handlePlaylistUpdate();
+    // ✅ SYNCHRONISATION EXPLICITE: Seulement si la référence change
+    if (prevProps.playlist !== this.props.playlist) {
+      this.synchronizePlaylistWithManager();
+    }
+  }
+
+  synchronizePlaylistWithManager = async () => {
+    const { playlist } = this.props;
+    
+    console.log('🎮 FunPlayer: Synchronizing playlist with manager:', playlist?.length || 0, 'items');
+    
+    if (!playlist || playlist.length === 0) {
+      this.playlist.reset();
+      this.setStatus('No playlist loaded');
+      return;
+    }
+
+    // ✅ SIMPLE: Juste synchroniser, une fois
+    try {
+      await this.playlist.loadPlaylist(playlist);
+      // Les événements géreront le reste
+    } catch (error) {
+      console.error('FunPlayer: Failed to sync playlist:', error);
+      this.setError('Failed to sync playlist', error);
     }
   }
 
   componentWillUnmount() {
-    // ✅ AJOUT: Marquer comme non initialisé lors du unmount
-    this.isInitialized = false;
-    this.isInitializing = false;
-    
     this.stopHapticLoop();
-    this.cleanup();
-  }
-
-  // ============================================================================
-  // THEME - INCHANGÉ
-  // ============================================================================
-
-  applyTheme = () => {
-    const { theme } = this.props;
-    if (!theme) return;
-
-    const element = document.querySelector('.fun-player') || 
-                   document.documentElement;
-
-    Object.entries(theme).forEach(([key, value]) => {
-      const cssVar = this.convertToCssVar(key);
-      element.style.setProperty(cssVar, value);
-    });
-
-    if (theme.base) {
-      element.setAttribute('data-theme', theme.base);
+    if (this.managersListener) {
+      this.managersListener();
     }
   }
 
-  convertToCssVar = (key) => {
-    const mappings = {
-      'primaryColor': '--primary-color',
-      'backgroundColor': '--background-color',
-      'secondaryBackgroundColor': '--secondary-background-color', 
-      'textColor': '--text-color',
-      'borderColor': '--border-color',
-      'fontFamily': '--font-family',
-      'baseRadius': '--base-radius',
-      'spacing': '--spacing'
-    };
-    
-    return mappings[key] || `--${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+  // ============================================================================
+  // ✅ NOUVEAU: PROPRIÉTÉS COMPUTED POUR ACCÈS SIMPLIFIÉ
+  // ============================================================================
+
+  get buttplug() {
+    return managers.buttplug;
+  }
+
+  get funscript() {
+    return managers.getFunscript();
+  }
+
+  get playlist() {
+    return managers.getPlaylist();
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: PLAYLIST MANAGEMENT SIMPLIFIÉ
+  // ✅ MODIFIÉ: GESTION D'ÉVÉNEMENTS ÉTENDUE
+  // ============================================================================
+
+  handleManagerEvent = (event, data) => {
+    switch (event) {
+      case 'buttplug:connection':
+        this.setStatus(data.connected ? 'Connected to Intiface' : 'Disconnected from Intiface');
+        this._triggerRender();
+        break;
+        
+      case 'buttplug:device':
+        this.setStatus(data.device ? `Device selected: ${data.device.name}` : 'No device selected');
+        this._triggerRender();
+        break;
+        
+      case 'buttplug:error':
+        this.setError('Device error', data.error);
+        break;
+        
+      // ✅ Événements funscript
+      case 'funscript:load':
+        this.setStatus(`Funscript loaded: ${data.channels.length} channels, ${data.duration.toFixed(2)}s`);
+        this._triggerRender();
+        break;
+        
+      case 'funscript:channels':
+        this._triggerRender(); // Re-render pour mettre à jour les UI qui dépendent des canaux
+        break;
+        
+      case 'funscript:options':
+      case 'funscript:globalOffset':
+        // Pas besoin de re-render complet, juste noter dans les logs
+        break;
+
+      // ✅ NOUVEAU: Événements playlist
+      case 'playlist:loaded':
+        this.setStatus(`Playlist loaded: ${data.totalItems} items`);
+        this.setState({ isReady: false }); // Prêt pour sélection d'item
+        this._triggerRender();
+        break;
+        
+      case 'playlist:itemChanged':
+        this.setStatus(`Playing item ${data.index + 1}: ${data.item?.name || 'Untitled'}`);
+        this.setState({ isReady: false }); // Pas encore prêt, attendre loadFunscript
+        this._triggerRender();
+        
+        // ✅ NOUVEAU: Charger le funscript de l'item sélectionné
+        this._loadItemFunscript(data.item);
+        break;
+        
+      case 'playlist:playbackChanged':
+        // Synchroniser l'état de lecture local
+        this.setState({ isPlaying: data.isPlaying });
+        break;
+        
+      case 'playlist:error':
+        this.setError('Playlist error', data.error);
+        break;
+        
+      // ✅ Événements combinés
+      case 'managers:autoConnect':
+        if (data.success) {
+          this.setStatus(`Auto-connected to ${data.device.name} (${data.mapResult.mapped}/${data.mapResult.total} channels mapped)`);
+        } else {
+          this.setError('Auto-connect failed', data.error);
+        }
+        this._triggerRender();
+        break;
+        
+      case 'managers:autoMap':
+        this.setStatus(`Auto-mapped ${data.result.mapped}/${data.result.total} channels to ${data.mode} actuators`);
+        break;
+    }
+  }
+
+  // ✅ NOUVEAU: Helper pour trigger re-render
+  _triggerRender = () => {
+    this.setState(prevState => ({ 
+      renderTrigger: prevState.renderTrigger + 1 
+    }));
+  }
+
+  // ============================================================================
+  // INITIALIZATION - ✅ SIMPLIFIÉ: Accès via propriétés computed
+  // ============================================================================
+
+  initializeComponent = () => {
+    try {
+      // Écouter les événements des managers
+      this.managersListener = managers.addListener(this.handleManagerEvent);
+      
+      this.setStatus('Component initialized');
+      
+      // Traitement initial de la playlist
+      if (this.props.playlist) {
+        this.handlePlaylistUpdate();
+      }
+      
+    } catch (error) {
+      console.error('FunPlayer: Initialization error:', error);
+      this.setError('Failed to initialize', error);
+    }
+  }
+
+  // ============================================================================
+  // PLAYLIST MANAGEMENT - ✅ SIMPLIFIÉ: Délègue au PlaylistManager
   // ============================================================================
 
   handlePlaylistUpdate = async () => {
     const { playlist } = this.props;
     
-    // Seulement si initialisé
-    if (!this.isInitialized) {
-      return;
-    }
+    console.log('🎮 FunPlayer.handlePlaylistUpdate called with:', playlist?.length, 'items');
     
     if (!playlist || playlist.length === 0) {
-      this.setState({ 
-        playlistItems: [],
-        currentPlaylistIndex: -1,
-        isReady: true 
-      });
+      this.playlist.reset();
       this.setStatus('No playlist loaded');
-      return;
-    }
-
-    // Valider et normaliser la playlist
-    const validItems = playlist.filter(item => 
-      item && (item.media || item.funscript || (item.duration && item.duration > 0))
-    );
-
-    if (validItems.length === 0) {
-      this.setState({ 
-        playlistItems: [],
-        currentPlaylistIndex: -1,
-        isReady: true 
-      });
-      this.setStatus('No valid items in playlist');
-      return;
-    }
-
-    this.setStatus(`Enriching playlist with posters...`);
-
-    try {
-      // Enrichir la playlist avec les posters
-      if (!this.mediaManager) {
-        this.mediaManager = new MediaManager();
-      }
-
-      const enrichedItems = await this.mediaManager.enrichPlaylistWithPosters(validItems);
-
-      this.setState({ 
-        playlistItems: enrichedItems,
-        currentPlaylistIndex: -1,
-        isReady: false 
-      });
-
-      this.setStatus(`Playlist loaded: ${enrichedItems.length} items with posters`);
-      
-    } catch (error) {
-      console.error('FunPlayer: Failed to enrich playlist with posters:', error);
-      // Fallback: utiliser la playlist sans posters
-      this.setState({ 
-        playlistItems: validItems,
-        currentPlaylistIndex: -1,
-        isReady: false 
-      });
-      this.setStatus(`Playlist loaded: ${validItems.length} items (no posters)`);
-    }
-  }
-
-  // ✅ NOUVEAU: Callback unifié pour les changements d'item playlist
-  handlePlaylistItemChange = async (vjsItem, index) => {
-    // ✅ MODIFIÉ: Mettre à jour l'index IMMÉDIATEMENT
-    this.setState({ 
-      currentPlaylistIndex: index,
-      isPlaying: false, 
-      currentActuatorData: new Map(),
-      isReady: false 
-    });
-    
-    // ✅ NOUVEAU: Arrêter l'haptique pendant la transition
-    this.stopHapticLoop();
-    if (this.buttplugRef.current) {
-      await this.buttplugRef.current.stopAll();
-    }
-    
-    if (!vjsItem || index === -1) {
-      this.setStatus('No valid item to play');
       this.setState({ isReady: true });
       return;
     }
-    
-    this.setStatus(`Loading item ${index + 1}...`);
+
+    this.setStatus(`Processing playlist...`);
 
     try {
-      // ✅ NOUVEAU: Charger le funscript de l'item actuel
-      if (vjsItem.funscript) {
-        if (typeof vjsItem.funscript === 'object') {
-          await this.loadFunscriptData(vjsItem.funscript);
+      console.log('🎮 Calling PlaylistManager.loadPlaylist...');
+      await this.playlist.loadPlaylist(playlist);
+      console.log('🎮 PlaylistManager loaded, items:', this.playlist.getItems().length);
+      
+    } catch (error) {
+      console.error('FunPlayer: Failed to process playlist:', error);
+      this.setError('Failed to process playlist', error);
+    }
+  }
+
+  // ✅ NOUVEAU: Charge le funscript d'un item (appelé depuis handleManagerEvent)
+  _loadItemFunscript = async (item) => {
+    if (!item) {
+      this.setState({ isReady: true });
+      return;
+    }
+
+    this.stopHapticLoop();
+    
+    // ✅ Arrêter les devices
+    if (this.buttplug) {
+      try {
+        await this.buttplug.stopAll();
+      } catch (error) {
+        console.warn('Failed to stop devices:', error);
+      }
+    }
+
+    try {
+      if (item.funscript) {
+        if (typeof item.funscript === 'object') {
+          await this.loadFunscriptData(item.funscript);
         } else {
-          await this.loadFunscript(vjsItem.funscript);
+          await this.loadFunscript(item.funscript);
         }
       } else {
         // Reset funscript si pas de haptic
-        this.funscriptRef.current?.reset();
+        this.funscript.reset();
       }
 
       this.setState({ isReady: true });
-      
-      const title = vjsItem.title || `Item ${index + 1}`;
-      this.setStatus(`Ready: ${title}`);
+      this.setStatus(`Ready: ${item.name || item.title || 'Untitled'}`);
 
     } catch (error) {
-      this.setError(`Failed to load item ${index + 1}`, error);
+      this.setError(`Failed to load funscript for item`, error);
     }
   }
+
+  // ✅ SUPPRIMÉ: Plus besoin de handlePlaylistItemChange
+  // Le PlaylistManager gère la navigation et les événements
 
   // ============================================================================
-  // INITIALIZATION - ✅ SIMPLIFIÉ
+  // FUNSCRIPT LOADING - ✅ MODIFIÉ: Utilise la propriété computed
   // ============================================================================
 
-  initializeManagers = async () => {
-    // Guard contre double initialisation
-    if (this.isInitialized || this.isInitializing) {
-      return;
-    }
-
-    this.isInitializing = true;
-
-    try {
-      // Vérifier que les refs existent avant initialisation
-      if (!this.buttplugRef || !this.funscriptRef) {
-        throw new Error('Refs not properly initialized');
-      }
-      
-      // Initialiser ButtPlugManager
-      this.buttplugRef.current = new ButtPlugManager();
-      if (this.buttplugRef.current && typeof this.buttplugRef.current.init === 'function') {
-        await this.buttplugRef.current.init();
-      } else {
-        throw new Error('ButtPlugManager failed to create');
-      }
-      
-      // Initialiser FunscriptManager
-      this.funscriptRef.current = new FunscriptManager();
-      if (!this.funscriptRef.current) {
-        throw new Error('FunscriptManager failed to create');
-      }
-      
-      // ✅ AJOUT: Marquer comme initialisé AVANT handlePlaylistUpdate
-      this.isInitialized = true;
-      this.isInitializing = false;
-      
-      this.setStatus('Managers initialized');
-      
-      // Traitement initial de la playlist
-      this.handlePlaylistUpdate();
-      
-    } catch (error) {
-      console.error('FunPlayer: Manager initialization error:', error);
-      this.isInitializing = false;
-      this.isInitialized = false;
-      this.setError('Failed to initialize managers', error);
-    }
-  }
-
-  // ✅ NOUVEAU: Méthode pour réinitialiser si nécessaire
-  reinitializeManagers = async () => {
-    console.log('FunPlayer: Reinitializing managers...');
-    this.isInitialized = false;
-    this.isInitializing = false;
-    
-    // Cleanup existant
-    await this.cleanup();
-    
-    // Réinitialiser
-    await this.initializeManagers();
-  }
-
-  // ✅ NOUVEAU: Méthodes de chargement funscript inchangées mais simplifiées
   loadFunscript = async (src) => {
     try {
-      console.log('Loading funscript from:', src);
       let data;
-      
       if (typeof src === 'string') {
         if (src.startsWith('http') || src.startsWith('/')) {
           const response = await fetch(src);
@@ -298,27 +289,16 @@ class FunPlayer extends Component {
         } else {
           data = JSON.parse(src);
         }
-      } else if (typeof src === 'object') {
+      } else {
         data = src;
-      } else {
-        throw new Error('Invalid funscript source type');
       }
       
-      console.log('Funscript data loaded:', data);
+      // ✅ MODIFIÉ: Utilise la propriété computed
+      this.funscript.load(data);
       
-      if (this.funscriptRef.current) {
-        this.funscriptRef.current.load(data);
-        console.log('Funscript loaded into manager');
-        
-        // Auto-map automatique après chargement
-        const capabilities = this.buttplugRef.current?.getCapabilities();
-        const mapResult = this.funscriptRef.current.autoMapChannels(capabilities);
-        
-        console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels to ${mapResult.mode}`);
-        
-      } else {
-        throw new Error('FunscriptManager not initialized');
-      }
+      // Auto-map avec device connecté
+      const mapResult = managers.autoMapChannels();
+      console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels`);
       
     } catch (error) {
       console.error('Failed to load funscript:', error);
@@ -328,21 +308,11 @@ class FunPlayer extends Component {
 
   loadFunscriptData = async (data) => {
     try {
-      console.log('Loading funscript from data:', data);
+      // ✅ MODIFIÉ: Utilise la propriété computed
+      this.funscript.load(data);
       
-      if (this.funscriptRef.current) {
-        this.funscriptRef.current.load(data);
-        console.log('Funscript loaded into manager');
-        
-        // Auto-map automatique après chargement
-        const capabilities = this.buttplugRef.current?.getCapabilities();
-        const mapResult = this.funscriptRef.current.autoMapChannels(capabilities);
-        
-        console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels to ${mapResult.mode}`);
-        
-      } else {
-        throw new Error('FunscriptManager not initialized');
-      }
+      const mapResult = managers.autoMapChannels();
+      console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels`);
       
     } catch (error) {
       console.error('Failed to load funscript data:', error);
@@ -351,7 +321,7 @@ class FunPlayer extends Component {
   }
 
   // ============================================================================
-  // MEDIA PLAYER EVENTS - ✅ SIMPLIFIÉ (plus de gestion manuelle des transitions)
+  // MEDIA PLAYER EVENTS - ✅ MODIFIÉ: Synchronisation avec PlaylistManager
   // ============================================================================
 
   handleMediaLoadEnd = (data) => {
@@ -372,7 +342,11 @@ class FunPlayer extends Component {
     this.lastMediaTime = this.hapticTime;
     this.lastSyncTime = performance.now();
     
-    this.setState({ isPlaying: true });
+    const currentTime = this.mediaPlayerRef.current?.getTime() || 0;
+    const duration = this.mediaPlayerRef.current?.getDuration() || 0;
+    
+    // ✅ NOUVEAU: Synchroniser avec PlaylistManager
+    this.playlist.updatePlaybackState(true, currentTime, duration);
     
     if (this.hasFunscript()) {
       this.startHapticLoop();
@@ -382,28 +356,48 @@ class FunPlayer extends Component {
     }
   }
 
-  handleMediaPause = () => {
+  handleMediaPause = async () => {
     if (this.hasFunscript()) {
       this.stopHapticLoop();
-      this.buttplugRef.current?.stopAll();
+      // ✅ MODIFIÉ: Utilise la propriété computed + gestion d'erreur
+      if (this.buttplug) {
+        try {
+          await this.buttplug.stopAll();
+        } catch (error) {
+          console.warn('Failed to stop devices:', error);
+        }
+      }
     }
     
-    this.setState({ isPlaying: false, currentActuatorData: new Map() });
+    const currentTime = this.mediaPlayerRef.current?.getTime() || 0;
+    const duration = this.mediaPlayerRef.current?.getDuration() || 0;
+    
+    // ✅ NOUVEAU: Synchroniser avec PlaylistManager
+    this.playlist.updatePlaybackState(false, currentTime, duration);
+    
+    this.setState({ currentActuatorData: new Map() });
     this.setStatus('Paused');
   }
 
-  handleMediaEnd = () => {
+  handleMediaEnd = async () => {
     if (this.hasFunscript()) {
       this.stopHapticLoop();
-      this.buttplugRef.current?.stopAll();
+      // ✅ MODIFIÉ: Utilise la propriété computed + gestion d'erreur
+      if (this.buttplug) {
+        try {
+          await this.buttplug.stopAll();
+        } catch (error) {
+          console.warn('Failed to stop devices:', error);
+        }
+      }
     }
+    
+    // ✅ NOUVEAU: Synchroniser avec PlaylistManager
+    this.playlist.updatePlaybackState(false, 0, 0);
     
     this.hapticTime = 0;
     this.lastMediaTime = 0;
-    this.setState({ isPlaying: false, currentActuatorData: new Map() });
-    
-    // ✅ MODIFIÉ: En mode playlist, Video.js gère automatiquement l'auto-advance
-    // On se contente de notifier la fin de l'item actuel
+    this.setState({ currentActuatorData: new Map() });
     this.setStatus('Item ended');
   }
 
@@ -427,10 +421,180 @@ class FunPlayer extends Component {
         console.warn(`Haptic drift detected: ${(drift * 1000).toFixed(1)}ms, resyncing`);
       }
     }
+
+    // ✅ NOUVEAU: Synchronisation périodique avec PlaylistManager (throttled)
+    const duration = this.mediaPlayerRef.current?.getDuration() || 0;
+    this.playlist.updatePlaybackState(true, currentTime, duration);
   }
 
   // ============================================================================
-  // HAPTIC LOOP - INCHANGÉ
+  // HAPTIC LOOP - ✅ MODIFIÉ: Utilise les propriétés computed
+  // ============================================================================
+
+  processHapticFrame = async (timeDelta) => {
+    const mediaPlayer = this.mediaPlayerRef.current;
+    
+    // ✅ MODIFIÉ: Utilise les propriétés computed
+    if (!mediaPlayer || !this.funscript) return;
+    
+    this.hapticTime += timeDelta;
+    const currentTime = this.hapticTime;
+    
+    const mediaRefreshRate = this.getMediaRefreshRate(mediaPlayer);
+    const adjustedDuration = this.calculateLinearDuration(timeDelta, mediaRefreshRate);
+    
+    const actuatorCommands = this.funscript.interpolateToActuators(currentTime);
+    const visualizerData = new Map();
+    
+    for (const [actuatorIndex, value] of Object.entries(actuatorCommands)) {
+      const index = parseInt(actuatorIndex);
+      
+      let actuatorType = 'linear';
+      
+      // ✅ MODIFIÉ: Utilise la propriété computed + gestion d'erreur
+      if (this.buttplug && this.buttplug.getSelected()) {
+        actuatorType = this.buttplug.getActuatorType(index) || 'linear';
+        await this.sendHapticCommand(actuatorType, value, adjustedDuration * 1000, index);
+      }
+      
+      visualizerData.set(index, {
+        value: value,
+        type: actuatorType
+      });
+    }
+    
+    this.setState({ currentActuatorData: visualizerData });
+  }
+
+  sendHapticCommand = async (type, value, duration, actuatorIndex) => {
+    // ✅ MODIFIÉ: Utilise la propriété computed + gestion d'erreur robuste
+    if (!this.buttplug || !this.buttplug.isConnected) return;
+
+    try {
+      switch (type) {
+        case 'vibrate':
+          await this.buttplug.vibrate(value, actuatorIndex);
+          break;
+        case 'oscillate':
+          await this.buttplug.oscillate(value, actuatorIndex);
+          break;
+        case 'linear':
+          await this.buttplug.linear(value, duration, actuatorIndex);
+          break;
+        case 'rotate':
+          await this.buttplug.rotate(value, actuatorIndex);
+          break;
+        default:
+          console.warn(`Unknown haptic command type: ${type}`);
+          break;
+      }
+    } catch (error) {
+      // Silent fail pour les commandes haptiques (évite spam console)
+    }
+  }
+
+  // ============================================================================
+  // UTILITY METHODS - ✅ MODIFIÉ: Utilise les propriétés computed
+  // ============================================================================
+
+  hasFunscript = () => {
+    return this.funscript && this.funscript.getChannels().length > 0;
+  }
+
+  handleHapticSettingsChange = (channel, action, data) => {
+    switch (action) {
+      case 'autoMap':
+        this.setStatus(`Auto-mapped ${data.mapped}/${data.total} channels to ${data.mode}`);
+        break;
+      case 'globalOffset':
+        this.setStatus(`Global offset set to ${data}s`);
+        break;
+      case 'setOptions':
+        if (channel) {
+          this.setStatus(`Updated ${channel} settings`);
+        }
+        break;
+      default:
+        if (channel && action) {
+          this.setStatus(`Updated ${channel}: ${action}`);
+        }
+    }
+  }
+
+  // ============================================================================
+  // RENDER METHODS - ✅ MODIFIÉ: Debug info utilise les propriétés computed
+  // ============================================================================
+
+  renderDebugInfo() {
+    if (!this.state.showDebug) return null;
+    
+    // ✅ MODIFIÉ: Utilise les propriétés computed
+    const funscriptInfo = this.funscript?.getDebugInfo() || { loaded: false };
+    const buttplugStatus = this.buttplug?.getStatus() || { isConnected: false };
+    const playlistInfo = this.playlist.getPlaylistInfo(); // ✅ PlaylistManager
+    const { updateRate, currentActuatorData } = this.state;
+    
+    const safeActuatorData = currentActuatorData || new Map();
+    
+    return (
+      <div className="fp-block fp-block-standalone debug-info">
+        <div className="fp-section debug-content">
+          
+          {/* ✅ MODIFIÉ: Utilise PlaylistManager */}
+          {playlistInfo.totalItems > 0 && (
+            <div className="playlist-info fp-mb-sm">
+              <h4 className="fp-title">Playlist:</h4>
+              <p>Items: {playlistInfo.totalItems}</p>
+              <p>Current: {playlistInfo.currentIndex + 1}</p>
+              {playlistInfo.currentIndex >= 0 && (
+                <p>Title: {this.playlist.getCurrentItem()?.name || 'Untitled'}</p>
+              )}
+              <p>Playing: {playlistInfo.isPlaying ? 'Yes' : 'No'}</p>
+              <p>Time: {playlistInfo.currentTime.toFixed(1)}s / {playlistInfo.duration.toFixed(1)}s</p>
+            </div>
+          )}
+          
+          {this.hasFunscript() && (
+            <div className="performance-info fp-mb-sm">
+              <h4 className="fp-title">Performance:</h4>
+              <p>Update Rate: {updateRate}Hz</p>
+              <p>Frame Time: {(1000/updateRate).toFixed(1)}ms</p>
+              <p>Active Actuators: {safeActuatorData.size}</p>
+            </div>
+          )}
+          
+          <div className="funscript-info fp-mb-sm">
+            <h4 className="fp-title">Funscript:</h4>
+            {funscriptInfo && funscriptInfo.loaded ? (
+              <>
+                <p>Channels: {funscriptInfo.channels ? Object.keys(funscriptInfo.channels).length : 0}</p>
+                <p>Duration: {typeof funscriptInfo.duration === 'number' ? funscriptInfo.duration.toFixed(2) : 0}s</p>
+                {funscriptInfo.globalOffset !== undefined && (
+                  <p>Global Offset: {funscriptInfo.globalOffset.toFixed(3)}s</p>
+                )}
+              </>
+            ) : (
+              <p>❌ No funscript loaded</p>
+            )}
+          </div>
+          
+          {this.hasFunscript() && buttplugStatus && (
+            <div className="device-info fp-mb-sm">
+              <h4 className="fp-title">Device:</h4>
+              <p>Connected: {buttplugStatus.isConnected ? 'Yes' : 'No'}</p>
+              <p>Device Count: {buttplugStatus.deviceCount || 0}</p>
+              {buttplugStatus.selectedDevice && (
+                <p>Selected: {buttplugStatus.selectedDevice.name}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // AUTRES MÉTHODES INCHANGÉES
   // ============================================================================
 
   startHapticLoop = () => {
@@ -467,6 +631,15 @@ class FunPlayer extends Component {
     this.hapticIntervalId = setTimeout(optimizedLoop, targetInterval);
   }
 
+  stopHapticLoop = () => {
+    if (this.hapticIntervalId) {
+      clearTimeout(this.hapticIntervalId);
+      this.hapticIntervalId = null;
+    }
+    this.expectedHapticTime = 0;
+    this.lastSyncTime = 0;
+  }
+
   restartWithNewRate = () => {
     const wasPlaying = this.hapticIntervalId !== null;
     if (wasPlaying) {
@@ -475,56 +648,15 @@ class FunPlayer extends Component {
     }
   }
 
-  handleUpdateRateChange = (newRate) => {
-    this.setState({ updateRate: newRate });
-    this.setStatus(`Update rate changed to ${newRate}Hz`);
-  }
-
-  processHapticFrame = (timeDelta) => {
-    const mediaPlayer = this.mediaPlayerRef.current;
-    const funscriptManager = this.funscriptRef.current;
-    const buttplugManager = this.buttplugRef.current;
-    
-    if (!mediaPlayer || !funscriptManager) return;
-    
-    this.hapticTime += timeDelta;
-    const currentTime = this.hapticTime;
-    
-    const mediaRefreshRate = this.getMediaRefreshRate(mediaPlayer);
-    const adjustedDuration = this.calculateLinearDuration(timeDelta, mediaRefreshRate);
-    
-    const actuatorCommands = funscriptManager.interpolateToActuators(currentTime);
-    const visualizerData = new Map();
-    
-    for (const [actuatorIndex, value] of Object.entries(actuatorCommands)) {
-      const index = parseInt(actuatorIndex);
-      
-      let actuatorType = 'linear';
-      
-      if (buttplugManager && buttplugManager.getSelected()) {
-        actuatorType = buttplugManager.getActuatorType(index) || 'linear';
-        this.sendHapticCommand(actuatorType, value, adjustedDuration * 1000, index);
-      }
-      
-      visualizerData.set(index, {
-        value: value,
-        type: actuatorType
-      });
-    }
-    
-    this.setState({ currentActuatorData: visualizerData });
-  }
-
   getMediaRefreshRate = (mediaPlayer) => {
     const state = mediaPlayer.getState();
     const mediaType = state.mediaType;
     
     switch (mediaType) {
       case 'playlist':
-        // En mode playlist, on se base sur le contenu de l'item actuel
         const currentItem = mediaPlayer.getCurrentItem();
         if (!currentItem || !currentItem.sources || currentItem.sources.length === 0) {
-          return this.state.updateRate; // Fallback timeline mode
+          return this.state.updateRate;
         }
         const mimeType = currentItem.sources[0].type || '';
         return mimeType.startsWith('audio/') ? this.state.updateRate : 30;
@@ -541,104 +673,14 @@ class FunPlayer extends Component {
     return Math.max(0.01, Math.min(0.1, safeDuration));
   }
 
-  sendHapticCommand = async (type, value, duration, actuatorIndex) => {
-    const buttplugManager = this.buttplugRef.current;
-    
-    if (!buttplugManager || !buttplugManager.isConnected) return;
+  getUpdateRate = () => this.state.updateRate
 
-    try {
-      switch (type) {
-        case 'vibrate':
-          await buttplugManager.vibrate(value, actuatorIndex);
-          break;
-        case 'oscillate':
-          await buttplugManager.oscillate(value, actuatorIndex);
-          break;
-        case 'linear':
-          await buttplugManager.linear(value, duration, actuatorIndex);
-          break;
-        case 'rotate':
-          await buttplugManager.rotate(value, actuatorIndex);
-          break;
-        default:
-          console.warn(`Unknown haptic command type: ${type}`);
-          break;
-      }
-    } catch (error) {
-      // Silent fail for haptic commands
-    }
+  handleUpdateRateChange = (newRate) => {
+    this.setState({ updateRate: newRate });
+    this.setStatus(`Update rate changed to ${newRate}Hz`);
   }
 
-  stopHapticLoop = () => {
-    if (this.hapticIntervalId) {
-      clearTimeout(this.hapticIntervalId);
-      this.hapticIntervalId = null;
-    }
-    this.expectedHapticTime = 0;
-    this.lastSyncTime = 0;
-  }
-
-  // ============================================================================
-  // STATUS MANAGEMENT - INCHANGÉ
-  // ============================================================================
-
-  setStatus = (message) => {
-    this.setState({ status: message, error: null });
-  }
-
-  setError = (message, error = null) => {
-    console.error(message, error);
-    
-    let errorMessage = null;
-    if (error) {
-      if (typeof error === 'string') {
-        errorMessage = error;
-      } else if (error.message) {
-        errorMessage = error.message;
-      } else {
-        errorMessage = String(error);
-      }
-    }
-    
-    this.setState({ 
-      status: message, 
-      error: errorMessage 
-    });
-  }
-
-  // ============================================================================
-  // HAPTIC SETTINGS HANDLERS - INCHANGÉ
-  // ============================================================================
-
-  handleHapticSettingsChange = (channel, action, data) => {
-    switch (action) {
-      case 'autoMap':
-        this.setStatus(`Auto-mapped ${data.mapped}/${data.total} channels to ${data.mode}`);
-        break;
-      case 'globalOffset':
-        this.setStatus(`Global offset set to ${data}s`);
-        break;
-      case 'setOptions':
-        if (channel) {
-          this.setStatus(`Updated ${channel} settings`);
-        }
-        break;
-      default:
-        if (channel && action) {
-          this.setStatus(`Updated ${channel}: ${action}`);
-        }
-    }
-  }
-
-  // ============================================================================
-  // UTILITY METHODS - INCHANGÉ
-  // ============================================================================
-
-  triggerResize = () => {
-    if (this.props.onResize) {
-      this.props.onResize();
-    }
-  }
+  triggerResize = () => this.props.onResize?.()
 
   handleToggleVisualizer = () => {
     this.setState({ showVisualizer: !this.state.showVisualizer }, () => {
@@ -652,65 +694,52 @@ class FunPlayer extends Component {
     });
   }
 
-  hasFunscript = () => {
-    return this.funscriptRef.current && this.funscriptRef.current.getChannels().length > 0;
+  setStatus = (message) => this.setState({ status: message, error: null })
+  
+  setError = (message, error = null) => {
+    console.error(message, error);
+    this.setState({ 
+      status: message, 
+      error: error?.message || String(error) || null 
+    });
   }
 
-  cleanup = async () => {
-      this.stopHapticLoop();
-      
-      // ✅ MODIFIÉ: Cleanup conditionnel et avec gestion d'erreur
-      if (this.buttplugRef.current) {
-        try {
-          await this.buttplugRef.current.cleanup();
-        } catch (error) {
-          console.error('FunPlayer: ButtPlug cleanup error:', error);
-        }
-        this.buttplugRef.current = null;
-      }
-      
-      if (this.funscriptRef.current) {
-        try {
-          this.funscriptRef.current.reset();
-        } catch (error) {
-          console.error('FunPlayer: Funscript cleanup error:', error);
-        }
-        this.funscriptRef.current = null;
-      }
-      
-      if (this.mediaManager) {
-        try {
-          this.mediaManager.cleanup();
-        } catch (error) {
-          console.error('FunPlayer: MediaManager cleanup error:', error);
-        }
-        this.mediaManager = null;
-      }
-      
-      // ✅ AJOUT: Reset état d'initialisation
-      this.isInitialized = false;
-      this.isInitializing = false;
-      
-      this.setState({
-        isPlaying: false,
-        currentActuatorData: new Map(),
-        status: 'Cleaned up',
-        error: null,
-        currentPlaylistIndex: -1,
-        playlistItems: []
-      });
+  applyTheme = () => {
+    const { theme } = this.props;
+    if (!theme) return;
+
+    const element = document.querySelector('.fun-player') || 
+                   document.documentElement;
+
+    Object.entries(theme).forEach(([key, value]) => {
+      const cssVar = this.convertToCssVar(key);
+      element.style.setProperty(cssVar, value);
+    });
+
+    if (theme.base) {
+      element.setAttribute('data-theme', theme.base);
+    }
   }
 
-  // ============================================================================
-  // RENDER METHODS - ✅ MODIFIÉ pour passer la playlist au MediaPlayer
-  // ============================================================================
+  convertToCssVar = (key) => {
+    const mappings = {
+      'primaryColor': '--primary-color',
+      'backgroundColor': '--background-color',
+      'secondaryBackgroundColor': '--secondary-background-color', 
+      'textColor': '--text-color',
+      'borderColor': '--border-color',
+      'fontFamily': '--font-family',
+      'baseRadius': '--base-radius',
+      'spacing': '--spacing'
+    };
+    
+    return mappings[key] || `--${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+  }
 
   renderHapticSettings() {
     return (
       <div className="fp-block fp-block-first haptic-settings-section">
         <HapticSettingsComponent 
-          buttplugManagerRef={this.buttplugRef}
-          funscriptManagerRef={this.funscriptRef}
           onUpdateRateChange={this.handleUpdateRateChange}
           onGetUpdateRate={this.getUpdateRate}
           onSettingsChange={this.handleHapticSettingsChange}
@@ -722,14 +751,13 @@ class FunPlayer extends Component {
   }
 
   renderMediaPlayer() {
-    const { playlistItems } = this.state;
+    // ✅ MODIFIÉ: Utilise PlaylistManager au lieu du state
+    const playlistItems = this.playlist.getItems();
     
     return (
       <div className="fp-block fp-block-middle media-section">
         <MediaPlayer
           ref={this.mediaPlayerRef}
-          playlist={playlistItems}  // ✅ MODIFIÉ: Passer la playlist au lieu de src individuel
-          onPlaylistItemChange={this.handlePlaylistItemChange}  // ✅ NOUVEAU: Callback unifié
           onPlay={this.handleMediaPlay}
           onPause={this.handleMediaPause}
           onEnd={this.handleMediaEnd}
@@ -758,7 +786,10 @@ class FunPlayer extends Component {
   }
 
   renderStatusBar() {
-    const { status, error, isReady, showVisualizer, showDebug, currentPlaylistIndex, playlistItems } = this.state;
+    const { status, error, isReady, showVisualizer, showDebug } = this.state;
+    
+    // ✅ MODIFIÉ: Utilise PlaylistManager au lieu du state
+    const playlistInfo = this.playlist.getPlaylistInfo();
     
     return (
       <div className="fp-block fp-block-last status-bar-section">
@@ -777,16 +808,15 @@ class FunPlayer extends Component {
               {this.state.updateRate}Hz
             </span>
             
-            {/* ✅ NOUVEAU: Affichage playlist info */}
-            {playlistItems.length > 1 && (
+            {playlistInfo.totalItems > 1 && (
               <span className="fp-unit">
-                {currentPlaylistIndex + 1}/{playlistItems.length}
+                {playlistInfo.currentIndex + 1}/{playlistInfo.totalItems}
               </span>
             )}
             
             {this.hasFunscript() && (
               <span className="fp-unit">
-                {this.funscriptRef.current.getChannels().length} channels
+                {this.funscript.getChannels().length} channels
               </span>
             )}
             
@@ -811,81 +841,14 @@ class FunPlayer extends Component {
     );
   }
 
-  renderDebugInfo() {
-    if (!this.state.showDebug) return null;
-    
-    const funscriptInfo = this.funscriptRef.current?.getDebugInfo();
-    const deviceInfo = this.buttplugRef.current?.getSelected();
-    const { updateRate, currentActuatorData, playlistItems, currentPlaylistIndex } = this.state;
-    
-    const safeActuatorData = currentActuatorData || new Map();
-    
-    return (
-      <div className="fp-block fp-block-standalone debug-info">
-        <div className="fp-section debug-content">
-          {/* ✅ NOUVEAU: Info playlist */}
-          {playlistItems.length > 0 && (
-            <div className="playlist-info fp-mb-sm">
-              <h4 className="fp-title">Playlist:</h4>
-              <p>Items: {playlistItems.length}</p>
-              <p>Current: {currentPlaylistIndex + 1}</p>
-              {playlistItems[currentPlaylistIndex] && (
-                <p>Title: {playlistItems[currentPlaylistIndex].title || 'Untitled'}</p>
-              )}
-            </div>
-          )}
-          
-          {this.hasFunscript() && (
-            <div className="performance-info fp-mb-sm">
-              <h4 className="fp-title">Performance:</h4>
-              <p>Update Rate: {updateRate}Hz</p>
-              <p>Frame Time: {(1000/updateRate).toFixed(1)}ms</p>
-              <p>Active Actuators: {safeActuatorData.size}</p>
-            </div>
-          )}
-          
-          <div className="funscript-info fp-mb-sm">
-            <h4 className="fp-title">Funscript:</h4>
-            {funscriptInfo && funscriptInfo.loaded ? (
-              <>
-                <p>Channels: {funscriptInfo.channels ? Object.keys(funscriptInfo.channels).length : 0}</p>
-                <p>Duration: {typeof funscriptInfo.duration === 'number' ? funscriptInfo.duration.toFixed(2) : 0}s</p>
-                {funscriptInfo.globalOffset !== undefined && (
-                  <p>Global Offset: {funscriptInfo.globalOffset.toFixed(3)}s</p>
-                )}
-              </>
-            ) : (
-              <p>❌ No funscript loaded</p>
-            )}
-          </div>
-          
-          {this.hasFunscript() && deviceInfo && (
-            <div className="device-info fp-mb-sm">
-              <h4 className="fp-title">Device:</h4>
-              <p>Name: {deviceInfo.name || 'Unknown'}</p>
-              <p>Index: {typeof deviceInfo.index === 'number' ? deviceInfo.index : 'N/A'}</p>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  getUpdateRate = () => {
-    return this.state.updateRate;
-  }
-
-  // ============================================================================
-  // RENDER PRINCIPAL - ✅ MODIFIÉ: PlaylistComponent réintégré comme UI pure
-  // ============================================================================
-
   render() {
-    const { playlistItems, currentPlaylistIndex } = this.state;
+    // ✅ MODIFIÉ: Utilise PlaylistManager au lieu du state
+    const playlistInfo = this.playlist.getPlaylistInfo();
+    const playlistItems = this.playlist.getItems();
     
     return (
       <div className="fun-player">
         
-        {/* Colonne principale */}
         <div className="fp-main-column">
           {this.renderHapticSettings()}
           {this.renderMediaPlayer()}
@@ -894,13 +857,8 @@ class FunPlayer extends Component {
           {this.renderStatusBar()}
         </div>
         
-        {/* ✅ MODIFIÉ: PlaylistComponent avec props optimisées */}
         {playlistItems.length > 1 && (
-          <PlaylistComponent
-            playlist={playlistItems}
-            currentIndex={currentPlaylistIndex}
-            mediaPlayerRef={this.mediaPlayerRef}
-          />
+          <PlaylistComponent/>
         )}
         
       </div>

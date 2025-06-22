@@ -7,18 +7,16 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
   constructor(props) {
     super(props);
     
-    // ✅ AJOUT: État pour éviter les appels prématurés
     this.state = {
       isStreamlitReady: false,
       lastHeight: 0
     };
     
-    // ✅ AJOUT: Debouncer pour setFrameHeight
+    // Debouncer pour setFrameHeight
     this.resizeTimeout = null;
   }
 
   componentDidMount() {
-    // ✅ MODIFIÉ: Attendre que Streamlit soit vraiment prêt
     this.waitForStreamlitReady().then(() => {
       this.setState({ isStreamlitReady: true });
       this.handleResize();
@@ -26,23 +24,23 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    // ✅ MODIFIÉ: Seulement resize si Streamlit est prêt
     if (this.state.isStreamlitReady && !prevState.isStreamlitReady) {
       this.handleResize();
     }
   }
 
   componentWillUnmount() {
-    // ✅ AJOUT: Cleanup du timeout
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
     }
   }
 
-  // ✅ NOUVEAU: Attendre que Streamlit soit vraiment initialisé
+  // ============================================================================
+  // STREAMLIT INTEGRATION - Inchangé
+  // ============================================================================
+
   waitForStreamlitReady = async () => {
     return new Promise((resolve) => {
-      // Vérifier si Streamlit et ses méthodes sont disponibles
       const checkStreamlit = () => {
         if (Streamlit && 
             typeof Streamlit.setFrameHeight === 'function' && 
@@ -56,14 +54,11 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     });
   }
 
-  // ✅ MODIFIÉ: Resize avec debouncing et vérifications
   handleResize = () => {
-    // Annuler le timeout précédent
     if (this.resizeTimeout) {
       clearTimeout(this.resizeTimeout);
     }
     
-    // ✅ MODIFIÉ: Debouncer et vérifier l'état
     this.resizeTimeout = setTimeout(() => {
       if (!this.state.isStreamlitReady || !Streamlit || typeof Streamlit.setFrameHeight !== 'function') {
         return;
@@ -72,8 +67,7 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       try {
         const height = document.body.scrollHeight;
         
-        // ✅ AJOUT: Éviter les appels redondants
-        if (Math.abs(height - this.state.lastHeight) > 5) { // Seuil de 5px
+        if (Math.abs(height - this.state.lastHeight) > 5) {
           Streamlit.setFrameHeight(height);
           this.setState({ lastHeight: height });
         }
@@ -83,7 +77,10 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     }, 50);
   }
 
-  // Convertir le thème Streamlit en variables CSS - INCHANGÉ
+  // ============================================================================
+  // THEME MANAGEMENT - Inchangé
+  // ============================================================================
+
   getStreamlitThemeVariables = () => {
     const { theme } = this.props;
     
@@ -110,14 +107,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       themeVars['--disabled-color'] = this.hexToRgba(theme.textColor, 0.3);
     }
     
-    if (theme.linkColor) {
-      themeVars['--link-color'] = theme.linkColor;
-    }
-    
-    if (theme.codeBackgroundColor) {
-      themeVars['--code-background-color'] = theme.codeBackgroundColor;
-    }
-    
     if (theme.borderColor) {
       themeVars['--border-color'] = theme.borderColor;
     }
@@ -126,38 +115,13 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
       themeVars['--font-family'] = theme.font;
     }
     
-    if (theme.codeFont) {
-      themeVars['--code-font-family'] = theme.codeFont;
-    }
-    
-    if (theme.headingFont) {
-      themeVars['--heading-font-family'] = theme.headingFont;
-    }
-    
     if (theme.baseRadius) {
       themeVars['--base-radius'] = theme.baseRadius;
-    }
-    
-    if (theme.showWidgetBorder !== undefined) {
-      themeVars['--widget-border-width'] = theme.showWidgetBorder ? '1px' : '0px';
-    }
-    
-    if (theme.sidebar) {
-      if (theme.sidebar.backgroundColor) {
-        themeVars['--sidebar-background-color'] = theme.sidebar.backgroundColor;
-      }
-      if (theme.sidebar.textColor) {
-        themeVars['--sidebar-text-color'] = theme.sidebar.textColor;
-      }
-      if (theme.sidebar.borderColor) {
-        themeVars['--sidebar-border-color'] = theme.sidebar.borderColor;
-      }
     }
     
     return themeVars;
   };
 
-  // Utilitaire hex vers rgba - INCHANGÉ
   hexToRgba = (hex, alpha) => {
     if (!hex) return null;
     
@@ -201,7 +165,7 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     const { args, theme: streamlitTheme } = this.props;
     const { isStreamlitReady } = this.state;
     
-    // Extract props
+    // Extract props - Plus simple car plus de refs à passer
     const playlist = args?.playlist || null;
     const customTheme = args?.theme || null;
     
@@ -211,7 +175,6 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
     
     const dataTheme = (customTheme?.base || streamlitTheme?.base) === 'dark' ? 'dark' : 'light';
     
-    // ✅ MODIFIÉ: Rendre seulement si Streamlit est prêt
     return (
       <div
         style={themeVariables} 
@@ -221,6 +184,7 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
         {isStreamlitReady ? (
           <FunPlayer 
             playlist={playlist}
+            theme={customTheme}
             onResize={this.handleResize}
           />
         ) : (

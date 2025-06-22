@@ -1,9 +1,43 @@
+# ============================================================================
+# MÉTADONNÉES DU PACKAGE
+# ============================================================================
+
+from pathlib import Path
+import toml
+
+ROOT=Path(__file__).parent.parent
+with open(ROOT/"pyproject.toml",encoding="utf-8") as f:
+    config=toml.load(f)
+
+# Package metadata
+__version__ = config['project']['version']
+__author__ = config['project']['authors'][0]['name']
+__email__ = config['project']['authors'][0]['email']
+__description__ = config['project']['description']
+
+# ✅ NOUVEAU: Export des utilitaires
+__all__ = [
+    "funplayer", 
+    "create_playlist_item", 
+    "create_playlist",
+    "load_funscript", 
+    "file_to_data_url", 
+    "validate_playlist_item",
+    "is_funscript_file",
+    "is_supported_media_file",
+    "get_file_size_mb"
+]
+
+# ============================================================================
+# IMPORTS AND COMPONENT DECLARATION
+# ============================================================================
+
 import os
 import json
 import base64
 from pathlib import Path
 from io import BytesIO
-from typing import Union, Optional
+from typing import Union, Optional, List, Dict, Any
 import streamlit.components.v1 as components
 
 # Create a _RELEASE constant. We'll set this to False while we're developing
@@ -22,6 +56,168 @@ else:
     parent_dir = os.path.dirname(os.path.abspath(__file__))
     build_dir = os.path.join(parent_dir, "frontend/build")
     _component_func = components.declare_component("streamlit_funplayer", path=build_dir)
+
+# ============================================================================
+# UTILITAIRES DE CONVERSION - ✅ NOUVEAU: Helpers pour format Video.js étendu
+# ============================================================================
+
+def create_playlist_item(
+    sources: Union[str, List[Dict[str, str]]] = None,
+    funscript: Union[str, Dict, os.PathLike] = None,
+    name: str = None,
+    description: str = None,
+    poster: Union[str, os.PathLike, BytesIO] = None,
+    duration: float = None,
+    **kwargs
+) -> Dict[str, Any]:
+    """
+    Crée un item de playlist au format Video.js étendu.
+    
+    Args:
+        sources: URL/chemin media OU liste de sources multiples
+        funscript: Données funscript (dict, URL, ou chemin fichier)  
+        name: Titre de l'item (affiché dans la playlist)
+        description: Description détaillée (tooltip)
+        poster: Image poster (URL, chemin, ou BytesIO)
+        duration: Durée explicite (pour funscript seul)
+        **kwargs: Autres métadonnées Video.js (textTracks, etc.)
+        
+    Returns:
+        Dict au format Video.js étendu
+        
+    Examples:
+        # Item simple
+        create_playlist_item(
+            sources="video.mp4",
+            funscript={"actions": [...]},
+            name="Scene 1"
+        )
+        
+        # Multi-résolutions  
+        create_playlist_item(
+            sources=[
+                {"src": "video_1080p.mp4", "type": "video/mp4", "label": "HD"},
+                {"src": "video_720p.mp4", "type": "video/mp4", "label": "SD"}
+            ],
+            funscript="script.funscript",
+            name="Scene Multi-Res"
+        )
+        
+        # Funscript seul
+        create_playlist_item(
+            funscript=load_funscript("haptic.funscript"),
+            name="Haptic Only",
+            duration=120.5
+        )
+    """
+    item = {}
+    
+    # ✅ SOURCES: Normaliser vers format Video.js
+    if sources:
+        if isinstance(sources, str):
+            # Source unique → convertir en array
+            item['sources'] = [{'src': sources}]
+        elif isinstance(sources, list):
+            # Sources multiples → valider le format
+            item['sources'] = []
+            for src in sources:
+                if isinstance(src, str):
+                    item['sources'].append({'src': src})
+                elif isinstance(src, dict):
+                    item['sources'].append(src)
+                else:
+                    raise ValueError(f"Invalid source format: {src}")
+        else:
+            raise ValueError(f"sources must be str or list, got {type(sources)}")
+    
+    # ✅ FUNSCRIPT: Supporter plusieurs formats
+    if funscript is not None:
+        if isinstance(funscript, (str, os.PathLike)):
+            # Chemin fichier → charger
+            funscript_path = Path(funscript)
+            if funscript_path.is_file():
+                item['funscript'] = load_funscript(funscript_path)
+            else:
+                # URL → passer tel quel
+                item['funscript'] = str(funscript)
+        elif isinstance(funscript, dict):
+            # Données directes → passer tel quel
+            item['funscript'] = funscript
+        else:
+            raise ValueError(f"funscript must be str, Path, or dict, got {type(funscript)}")
+    
+    # ✅ MÉTADONNÉES: Format Video.js standard
+    if name:
+        item['name'] = name
+    if description:
+        item['description'] = description
+    if duration is not None:
+        item['duration'] = float(duration)
+    
+    # ✅ POSTER: Convertir si nécessaire
+    if poster is not None:
+        if isinstance(poster, (str, os.PathLike)):
+            poster_path = Path(poster)
+            if poster_path.is_file():
+                # Fichier local → convertir en data URL
+                item['poster'] = file_to_data_url(poster_path)
+            else:
+                # URL → passer tel quel
+                item['poster'] = str(poster)
+        elif isinstance(poster, BytesIO):
+            # BytesIO → convertir en data URL
+            item['poster'] = file_to_data_url(poster)
+        else:
+            raise ValueError(f"poster must be str, Path, or BytesIO, got {type(poster)}")
+    
+    # ✅ AUTRES: Métadonnées Video.js additionnelles
+    item.update(kwargs)
+    
+    return item
+
+
+def create_playlist(*items, **playlist_options) -> List[Dict[str, Any]]:
+    """
+    Crée une playlist complète à partir de plusieurs items.
+    
+    Args:
+        *items: Items de playlist (dicts ou tuples de paramètres)
+        **playlist_options: Options globales (unused pour l'instant)
+        
+    Returns:
+        Liste d'items au format Video.js étendu
+        
+    Examples:
+        # Plusieurs items
+        playlist = create_playlist(
+            create_playlist_item("video1.mp4", funscript1, "Scene 1"),
+            create_playlist_item("video2.mp4", funscript2, "Scene 2")
+        )
+        
+        # Mixed formats
+        playlist = create_playlist(
+            {"sources": [{"src": "video.mp4"}], "name": "Manual item"},
+            create_playlist_item("audio.mp3", funscript=data, name="Generated item")
+        )
+    """
+    result = []
+    
+    for item in items:
+        if isinstance(item, dict):
+            # Déjà un dict → valider et ajouter
+            result.append(item)
+        elif isinstance(item, (tuple, list)):
+            # Tuple de paramètres → convertir
+            result.append(create_playlist_item(*item))
+        else:
+            raise ValueError(f"Invalid item type: {type(item)}")
+    
+    return result
+
+
+# ============================================================================
+# CONVERSION FICHIERS - ✅ AMÉLIORÉ: Détection MIME + validation
+# ============================================================================
 
 def file_to_data_url(
     file: Union[str, os.PathLike, BytesIO], 
@@ -87,29 +283,25 @@ def file_to_data_url(
     else:
         raise TypeError(f"Invalid file type: {type(file)}. Expected str, PathLike, or BytesIO")
     
-    # Determine MIME type from extension
+    # ✅ AMÉLIORÉ: Détection MIME plus complète
     file_extension = Path(filename).suffix.lower()
     mime_types = {
         # Video formats
-        '.mp4': 'video/mp4',
-        '.webm': 'video/webm', 
-        '.mov': 'video/quicktime',
-        '.avi': 'video/x-msvideo',
-        '.mkv': 'video/x-matroska',
-        '.ogv': 'video/ogg',
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.ogv': 'video/ogg',
         '.m4v': 'video/mp4',
         
         # Audio formats  
-        '.mp3': 'audio/mpeg',
-        '.wav': 'audio/wav',
-        '.ogg': 'audio/ogg',
-        '.m4a': 'audio/mp4',
-        '.aac': 'audio/aac',
-        '.flac': 'audio/flac',
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
+        '.oga': 'audio/ogg',
         
         # Funscript/JSON
-        '.funscript': 'application/json',
-        '.json': 'application/json',
+        '.funscript': 'application/json', '.json': 'application/json',
+        
+        # Images (posters)
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp'
     }
     
     mime_type = mime_types.get(file_extension, 'application/octet-stream')
@@ -121,6 +313,63 @@ def file_to_data_url(
         raise ValueError(f"Failed to encode file to base64: {e}")
     
     return f"data:{mime_type};base64,{base64_content}"
+
+
+def load_funscript(file_path: Union[str, os.PathLike]) -> Dict[str, Any]:
+    """
+    Utility function to load a funscript file from disk.
+    
+    Parameters
+    ----------
+    file_path : str or Path
+        Path to the .funscript file
+        
+    Returns
+    -------
+    dict
+        Parsed funscript data
+        
+    Examples
+    --------
+    >>> funscript_data = load_funscript("my_script.funscript")
+    >>> item = create_playlist_item(
+    ...     sources="video.mp4",
+    ...     funscript=funscript_data,
+    ...     name="My Scene"
+    ... )
+    """
+    file_path = Path(file_path)
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Funscript file not found: {file_path}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in funscript file {file_path}: {e}")
+
+
+# ============================================================================
+# UTILITAIRES DE VALIDATION - ✅ NOUVEAU
+# ============================================================================
+
+def validate_playlist_item(item: Dict[str, Any]) -> bool:
+    """
+    Valide qu'un item de playlist est au bon format.
+    
+    Args:
+        item: Item à valider
+        
+    Returns:
+        True si valide, False sinon
+    """
+    if not isinstance(item, dict):
+        return False
+    
+    # Au moins sources OU funscript requis
+    has_sources = 'sources' in item and isinstance(item['sources'], list) and len(item['sources']) > 0
+    has_funscript = 'funscript' in item and item['funscript'] is not None
+    
+    return has_sources or has_funscript
 
 
 def get_file_size_mb(file: Union[str, os.PathLike, BytesIO]) -> float:
@@ -146,110 +395,153 @@ def is_supported_media_file(filename: str) -> bool:
     }
     return extension in supported
 
+
 def is_funscript_file(filename: str) -> bool:
     """Check if a file is a funscript."""
     extension = Path(filename).suffix.lower()
     return extension in {'.funscript', '.json'}
 
-def load_funscript(file_path):
-    """
-    Utility function to load a funscript file from disk.
-    
-    Parameters
-    ----------
-    file_path : str
-        Path to the .funscript file
-        
-    Returns
-    -------
-    dict
-        Parsed funscript data
-        
-    Examples
-    --------
-    >>> funscript_data = load_funscript("my_script.funscript")
-    >>> funplayer(
-    ...     media_src="video.mp4",
-    ...     funscript_src=funscript_data
-    ... )
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        raise FileNotFoundError(f"Funscript file not found: {file_path}")
-    except json.JSONDecodeError as e:
-        raise ValueError(f"Invalid JSON in funscript file {file_path}: {e}")
 
-def funplayer(playlist=None, media=None, funscript=None, poster=None, theme=None, key=None, **kwargs):
+# ============================================================================
+# COMPOSANT PRINCIPAL - ✅ NOUVEAU: Format Video.js étendu uniquement
+# ============================================================================
+
+def funplayer(
+    playlist: List[Dict[str, Any]] = None,
+    theme: Dict[str, str] = None,
+    key: str = None
+) -> Any:
     """
     Create a FunPlayer component for synchronized media and haptic playback.
     
     Parameters
     ----------
-    playlist : dict or list of dict, optional
-        Playlist of items. Each dict can contain:
-        - 'media': URL/path to media file or None
-        - 'funscript': URL/path/data for funscript or None  
-        - 'poster': URL/path to poster image
-        - **metadata: duration, media_type, media_info, title, etc.
+    playlist : list of dict
+        Playlist d'items au format Video.js étendu. Chaque dict peut contenir:
         
-        Examples:
-        playlist={'media': 'video.mp4', 'funscript': 'script.funscript'}
-        playlist=[
-            {'media': 'video1.mp4', 'funscript': script_data, 'title': 'Scene 1'},
-            {'media': None, 'funscript': 'haptic.funscript', 'duration': 60}
-        ]
+        **Format Video.js standard:**
+        - 'sources': list of dict - Sources media (URLs ou data URLs)
+          Exemple: [{"src": "video.mp4", "type": "video/mp4", "label": "HD"}]
+        - 'poster': str - URL de l'image poster (optionnel)
+        - 'name': str - Titre de l'item (affiché dans playlist)
+        - 'description': str - Description détaillée (tooltip)
+        - 'duration': float - Durée en secondes (optionnel)
+        - 'textTracks': list - Sous-titres/captions (optionnel)
         
-    media, funscript, poster : DEPRECATED
-        Legacy support, converted to playlist format
+        **Extensions FunPlayer:**
+        - 'funscript': dict/str - Données funscript ou URL (optionnel)
+        
+        **Exemples:**
+        
+        # Item classique (video + funscript)
+        {
+            'sources': [{'src': 'video.mp4', 'type': 'video/mp4'}],
+            'funscript': {'actions': [...]},
+            'name': 'Scene 1',
+            'poster': 'poster.jpg'
+        }
+        
+        # Multi-résolutions
+        {
+            'sources': [
+                {'src': 'video_1080p.mp4', 'type': 'video/mp4', 'label': 'HD'},
+                {'src': 'video_720p.mp4', 'type': 'video/mp4', 'label': 'SD'}
+            ],
+            'funscript': funscript_data,
+            'name': 'Multi-Res Scene'
+        }
+        
+        # Funscript seul (haptic pur)
+        {
+            'funscript': load_funscript('script.funscript'),
+            'name': 'Haptic Only',
+            'duration': 180.5
+        }
+        
+        # Audio + haptic
+        {
+            'sources': [{'src': 'audio.mp3', 'type': 'audio/mpeg'}],
+            'funscript': funscript_data,
+            'name': 'Audio Experience'
+        }
         
     theme : dict, optional
-        Theme customization
+        Customisation du thème:
+        - 'primaryColor': Couleur principale
+        - 'backgroundColor': Arrière-plan
+        - 'textColor': Couleur du texte
+        - etc.
         
     key : str, optional
-        Component key
+        Clé unique du composant Streamlit
         
-    **kwargs : additional metadata
-        Applied to single-item playlist when using legacy API
+    Returns
+    -------
+    Any
+        Valeur de retour du composant (actuellement None)
+        
+    Examples
+    --------
+    
+    # Exemple simple
+    import streamlit as st
+    from streamlit_funplayer import funplayer, create_playlist_item
+    
+    playlist = [
+        create_playlist_item(
+            sources="https://example.com/video.mp4",
+            funscript={"actions": [{"at": 0, "pos": 0}, {"at": 1000, "pos": 100}]},
+            name="Demo Scene"
+        )
+    ]
+    
+    funplayer(playlist=playlist)
+    
+    # Exemple avec upload fichier
+    video_file = st.file_uploader("Video", type=['mp4', 'webm'])
+    funscript_file = st.file_uploader("Funscript", type=['funscript'])
+    
+    if video_file and funscript_file:
+        playlist = [
+            create_playlist_item(
+                sources=file_to_data_url(video_file),
+                funscript=json.loads(funscript_file.getvalue().decode('utf-8')),
+                name=video_file.name
+            )
+        ]
+        funplayer(playlist=playlist)
+    
+    # Playlist complète
+    from streamlit_funplayer import create_playlist
+    
+    playlist = create_playlist(
+        create_playlist_item("video1.mp4", funscript1, "Scene 1"),
+        create_playlist_item("audio2.mp3", funscript2, "Scene 2"),
+        create_playlist_item(funscript=funscript3, name="Haptic Only", duration=120)
+    )
+    
+    funplayer(playlist=playlist)
     """
     
+    # Validation des paramètres
+    if playlist is not None:
+        if not isinstance(playlist, list):
+            raise ValueError("playlist must be a list of dict")
+        
+        # Valider chaque item
+        for i, item in enumerate(playlist):
+            if not validate_playlist_item(item):
+                raise ValueError(f"Invalid playlist item at index {i}: must have 'sources' or 'funscript'")
+    
+    # Préparer les arguments pour le composant
     component_args = {}
     
-    # ✅ NOUVEAU: API playlist simplifiée
     if playlist is not None:
-        if isinstance(playlist, dict):
-            playlist = [playlist]
-        elif not isinstance(playlist, list):
-            raise ValueError("playlist must be a dict or list of dicts")
-        
         component_args["playlist"] = playlist
-    
-    # ✅ LEGACY: Conversion avec métadonnées kwargs
-    elif media is not None or funscript is not None or poster is not None:
-        legacy_item = {}
-        if media:
-            legacy_item['media'] = media
-        if funscript:
-            legacy_item['funscript'] = funscript
-        if poster:
-            legacy_item['poster'] = poster
-        
-        # ✅ NOUVEAU: Ajouter métadonnées kwargs
-        legacy_item.update(kwargs)
-            
-        component_args["playlist"] = [legacy_item]
     
     if theme is not None:
         component_args["theme"] = theme
     
     return _component_func(**component_args, key=key, default=None)
 
-# Package metadata
-__version__ = "0.1.0"
-__author__ = "Baptiste Ferrand"
-__email__ = "bferrand.maths@gmail.com"
-__description__ = "Streamlit component for synchronized media and haptic playback"
 
-# Export main functions
-__all__ = ["funplayer", "load_funscript", "file_to_data_url", "is_funscript_file","is_supported_media_file","get_file_size_mb"]

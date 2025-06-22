@@ -5,6 +5,7 @@ class FunscriptManager {
     this.duration = 0;
     this.options = new Map(); // channel -> options
 
+    this.globalScale = 1.0;
     this.globalOffset = 0.0;
     
     // ✅ NOUVEAU: Cache d'interpolation par canal
@@ -19,6 +20,14 @@ class FunscriptManager {
       invert: false,
       actuatorIndex: null
     };
+
+    // ✅ NOUVEAU: Système d'événements
+    this.onLoad = null;           // (data) => {} - Quand un funscript est chargé
+    this.onReset = null;          // () => {} - Quand le manager est remis à zéro
+    this.onChannelsChanged = null; // (channels) => {} - Quand les canaux changent
+    this.onOptionsChanged = null; // (channel, options) => {} - Quand des options changent
+    this.onGlobalOffsetChanged = null; // (offset) => {} - Quand l'offset global change
+    this.onGlobalScaleChanged = null;
   }
 
   // ============================================================================
@@ -31,15 +40,25 @@ class FunscriptManager {
       this._extractChannels();
       this._calculateDuration();
       this._initOptions();
-      this._initInterpolationCache(); // ✅ NOUVEAU: Initialiser le cache
+      this._initInterpolationCache();
       
       console.log(`Loaded: ${this.getChannels().length} channels, ${this.duration.toFixed(2)}s`);
+      
+      // ✅ NOUVEAU: Déclencher événement de chargement
+      this._notifyLoad(this.data);
+      this._notifyChannelsChanged(this.getChannels());
+      
       return true;
     } catch (error) {
       console.error('Load failed:', error);
       this._reset();
       return false;
     }
+  }
+
+  reset() {
+    this._reset();
+    this._notifyReset();
   }
 
   getChannels() {
@@ -58,9 +77,29 @@ class FunscriptManager {
     return this.duration;
   }
 
+  setGlobalScale(scale) {
+    const newScale = typeof scale === 'number' ? Math.max(0, Math.min(5.0, scale)) : 1.0;
+    
+    // ✅ NOUVEAU: Déclencher événement seulement si changement
+    if (this.globalScale !== newScale) {
+      this.globalScale = newScale;
+      this._notifyGlobalScaleChanged(newScale);
+    }
+  }
+
+  getGlobalScale() {
+    return this.globalScale;
+  }
+
   setGlobalOffset(offset) {
-    this.globalOffset = typeof offset === 'number' ? offset : 0.0;
-    this._clearInterpolationCache(); // ✅ NOUVEAU: Vider le cache si offset change
+    const newOffset = typeof offset === 'number' ? offset : 0.0;
+    
+    // ✅ NOUVEAU: Déclencher événement seulement si changement
+    if (this.globalOffset !== newOffset) {
+      this.globalOffset = newOffset;
+      this._clearInterpolationCache();
+      this._notifyGlobalOffsetChanged(newOffset);
+    }
   }
 
   getGlobalOffset() {
@@ -82,6 +121,9 @@ class FunscriptManager {
     if (opts.timeOffset !== undefined) {
       this._clearChannelCache(channel);
     }
+    
+    // ✅ NOUVEAU: Déclencher événement de changement d'options
+    this._notifyOptionsChanged(channel, updated);
     
     return true;
   }
@@ -105,10 +147,82 @@ class FunscriptManager {
       for (const ch of this.getChannels()) {
         this.options.set(ch, { ...this.defaults });
       }
-      this._clearInterpolationCache(); // ✅ NOUVEAU: Vider tout le cache
+      this._clearInterpolationCache();
+      
+      // ✅ NOUVEAU: Notifier pour tous les canaux
+      for (const ch of this.getChannels()) {
+        this._notifyOptionsChanged(ch, { ...this.defaults });
+      }
     } else if (this.hasChannel(channel)) {
       this.options.set(channel, { ...this.defaults });
-      this._clearChannelCache(channel); // ✅ NOUVEAU: Vider le cache du canal
+      this._clearChannelCache(channel);
+      
+      // ✅ NOUVEAU: Notifier pour le canal spécifique
+      this._notifyOptionsChanged(channel, { ...this.defaults });
+    }
+  }
+
+  // ============================================================================
+  // ✅ NOUVELLES MÉTHODES DE NOTIFICATION PRIVÉES
+  // ============================================================================
+
+  _notifyLoad(data) {
+    if (this.onLoad && typeof this.onLoad === 'function') {
+      try {
+        this.onLoad(data);
+      } catch (error) {
+        console.error('FunscriptManager: onLoad callback error:', error);
+      }
+    }
+  }
+
+  _notifyReset() {
+    if (this.onReset && typeof this.onReset === 'function') {
+      try {
+        this.onReset();
+      } catch (error) {
+        console.error('FunscriptManager: onReset callback error:', error);
+      }
+    }
+  }
+
+  _notifyChannelsChanged(channels) {
+    if (this.onChannelsChanged && typeof this.onChannelsChanged === 'function') {
+      try {
+        this.onChannelsChanged([...channels]); // Copie pour éviter mutation
+      } catch (error) {
+        console.error('FunscriptManager: onChannelsChanged callback error:', error);
+      }
+    }
+  }
+
+  _notifyOptionsChanged(channel, options) {
+    if (this.onOptionsChanged && typeof this.onOptionsChanged === 'function') {
+      try {
+        this.onOptionsChanged(channel, { ...options }); // Copie pour éviter mutation
+      } catch (error) {
+        console.error('FunscriptManager: onOptionsChanged callback error:', error);
+      }
+    }
+  }
+
+  _notifyGlobalScaleChanged(scale) {
+    if (this.onGlobalScaleChanged && typeof this.onGlobalScaleChanged === 'function') {
+      try {
+        this.onGlobalScaleChanged(scale);
+      } catch (error) {
+        console.error('FunscriptManager: onGlobalScaleChanged callback error:', error);
+      }
+    }
+  }
+
+  _notifyGlobalOffsetChanged(offset) {
+    if (this.onGlobalOffsetChanged && typeof this.onGlobalOffsetChanged === 'function') {
+      try {
+        this.onGlobalOffsetChanged(offset);
+      } catch (error) {
+        console.error('FunscriptManager: onGlobalOffsetChanged callback error:', error);
+      }
     }
   }
 
@@ -326,11 +440,28 @@ class FunscriptManager {
   // ============================================================================
 
   /**
-   * Auto-map tous les canaux vers des actuateurs selon les capabilities du device
-   * @param {Object|null} capabilities - Capabilities du ButtPlugManager ou null pour mode virtuel
-   * @returns {Object} Résultat du mapping { mapped: number, total: number, mode: string }
+   * Auto-map avec notification d'événement
    */
   autoMapChannels(capabilities = null) {
+    const result = this._performAutoMapping(capabilities);
+    
+    // ✅ NOUVEAU: Notifier les changements d'options pour tous les canaux mappés
+    if (result.mapped > 0) {
+      for (const channel of this.getChannels()) {
+        const options = this.getOptions(channel);
+        if (options.actuatorIndex !== null) {
+          this._notifyOptionsChanged(channel, options);
+        }
+      }
+    }
+    
+    return result;
+  }
+
+  /**
+   * Méthode privée pour effectuer le mapping (logique existante)
+   */
+  _performAutoMapping(capabilities = null) {
     const channels = this.getChannels();
     if (channels.length === 0) {
       return { mapped: 0, total: 0, mode: 'no channels' };
@@ -352,7 +483,7 @@ class FunscriptManager {
       }
 
       if (actuatorIndex !== null) {
-        this.setOptions(channel, { actuatorIndex });
+        this.setOptions(channel, { actuatorIndex }); // Utilisera _notifyOptionsChanged
         mapped++;
       }
     });
@@ -492,6 +623,7 @@ class FunscriptManager {
     return {
       loaded: true,
       duration: this.duration,
+      globalScale: this.globalScale,
       globalOffset: this.globalOffset,
       channels: channelInfo,
       // Stats globales du cache
@@ -891,10 +1023,11 @@ class FunscriptManager {
     // Apply invert
     if (opts.invert) value = 1 - value;
     
-    // ✅ SÉMANTIQUE CLARIFIÉE: Apply scale = % intensité max du jouet
-    // rawValue est maintenant toujours dans [0,1] grâce à la renormalisation
-    // scale=0.5 → 50% intensité max, scale=1.5 → 150% intensité max (boost)
+    // Apply individual channel scale
     value *= opts.scale;
+    
+    // ✅ NOUVEAU: Apply global scale (master intensity control)
+    value *= this.globalScale;
     
     // Clamp final pour sécurité jouet
     return Math.max(0, Math.min(1, value));
@@ -905,12 +1038,10 @@ class FunscriptManager {
     this.channels.clear();
     this.options.clear();
     this.duration = 0;
-    this._clearInterpolationCache(); // ✅ NOUVEAU: Vider le cache
-    this.channelMetadata?.clear(); // ✅ NOUVEAU: Vider les métadonnées
-  }
-
-  reset() {
-    this._reset();
+    this.globalOffset = 0.0;
+    this.globalScale = 1.0;  // ✅ NOUVEAU: Reset global scale
+    this._clearInterpolationCache();
+    this.channelMetadata?.clear();
   }
 }
 
