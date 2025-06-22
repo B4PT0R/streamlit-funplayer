@@ -6,7 +6,7 @@ A comprehensive media player component for synchronized audio/video and haptic p
 
 ### 🎥 Universal Media Support
 - **Video playback**: Standard 2D video formats (MP4, WebM, MOV, AVI)
-- **VR video support**:  3D SBS/180°/360° video with A-Frame integration
+- **VR video support**: 3D SBS/180°/360° video with A-Frame integration
 - **Audio playback**: MP3, WAV, OGG, M4A, AAC formats
 - **Timeline-only mode**: Haptic-only playback without media (generates silent audio)
 - **Playlist support**: Multiple items with automatic progression and manual navigation
@@ -64,9 +64,9 @@ st.title("🎮 FunPlayer Demo")
 # Simple video + haptic sync
 funplayer(
     playlist=[{
-        'media': 'https://example.com/video.mp4',
-        'funscript': 'https://example.com/script.funscript',
-        'title': 'Demo Scene'
+        'sources': [{'src': 'https://example.com/video.mp4', 'type': 'video/mp4'}],
+        'funscript': {'actions': [{"at": 0, "pos": 0}, {"at": 1000, "pos": 100}]},
+        'name': 'Demo Scene'
     }]
 )
 ```
@@ -77,17 +77,18 @@ funplayer(
 # Audio + haptics
 funplayer(
     playlist=[{
-        'media': 'audio.mp3',
+        'sources': [{'src': 'audio.mp3', 'type': 'audio/mp3'}],
         'funscript': funscript_data,
-        'title': 'Audio Experience'
+        'name': 'Audio Experience'
     }]
 )
 
 # Haptic-only (no media)
 funplayer(
     playlist=[{
-        'funscript': 'script.funscript',
-        'title': 'Pure Haptic'
+        'funscript': {'actions': [{"at": 0, "pos": 0}, {"at": 1000, "pos": 100}]},
+        'name': 'Pure Haptic',
+        'duration': 120.5
     }]
 )
 
@@ -95,18 +96,19 @@ funplayer(
 funplayer(
     playlist=[
         {
-            'media': 'video1.mp4',
-            'funscript': 'script1.funscript',
-            'title': 'Scene 1'
+            'sources': [{'src': 'video1.mp4', 'type': 'video/mp4'}],
+            'funscript': {'actions': [...]},
+            'name': 'Scene 1'
         },
         {
-            'media': 'audio2.mp3', 
+            'sources': [{'src': 'audio2.mp3', 'type': 'audio/mp3'}], 
             'funscript': script_data,
-            'title': 'Scene 2'
+            'name': 'Scene 2'
         },
         {
-            'funscript': 'haptic_only.funscript',
-            'title': 'Haptic Only'
+            'funscript': {'actions': [...]},
+            'name': 'Haptic Only',
+            'duration': 180.0
         }
     ]
 )
@@ -116,58 +118,54 @@ funplayer(
 
 ```python
 import json
-from streamlit_funplayer import funplayer, load_funscript, create_funscript
+from streamlit_funplayer import funplayer, load_funscript, create_playlist_item
 
 # Load from file
 funscript_data = load_funscript("my_script.funscript")
 
 # Create programmatically
-actions = [
-    {"at": 0, "pos": 0},
-    {"at": 1000, "pos": 100},
-    {"at": 2000, "pos": 50},
-    {"at": 3000, "pos": 0}
-]
-
 funscript = {
-    "actions":actions, # required
-
-    #optional metadata
-    "range":100,
-    "version":1,
-    "title": "Generated Script",
-    "duration":3000
+    "actions": [
+        {"at": 0, "pos": 0},
+        {"at": 1000, "pos": 100},
+        {"at": 2000, "pos": 50},
+        {"at": 3000, "pos": 0}
+    ],
+    "version": "1.0"
 }
 
-funplayer(playlist=[{
-    'media': 'audio.mp3',
-    'funscript': funscript,
-    'poster':'thumbnail.jpg'
-    'title': 'Simple funscript'
-}])
+funplayer(playlist=[
+    create_playlist_item(
+        sources="audio.mp3",
+        funscript=funscript,
+        name="Simple funscript"
+    )
+])
 
 # Multi-channel funscript
 multi_channel = {
     "version": "1.0",
-    "linear": [
+    "actions": [  # Main position channel
         {"at": 0, "pos": 0},
         {"at": 1000, "pos": 100}
     ],
-    "vibrate": [
+    "vibrate": [  # Vibration channel
         {"at": 0, "v": 0.0},
         {"at": 1000, "v": 1.0}
     ],
-    "rotate": [
+    "rotate": [  # Rotation channel
         {"at": 0, "speed": 0.2, "clockwise": True},
         {"at": 1000, "speed": 0.5, "clockwise": False}
     ]
 }
 
-funplayer(playlist=[{
-    'media': 'video.mp4',
-    'funscript': multi_channel,
-    'title': 'Multi-Channel Experience'
-}])
+funplayer(playlist=[
+    create_playlist_item(
+        sources=[{'src': 'video.mp4', 'type': 'video/mp4'}],
+        funscript=multi_channel,
+        name="Multi-Channel Experience"
+    )
+])
 ```
 
 ### File Upload Interface
@@ -175,9 +173,7 @@ funplayer(playlist=[{
 ```python
 import streamlit as st
 import json
-import base64
-from streamlit_funplayer import funplayer, file_to_data_url
-
+from streamlit_funplayer import funplayer, create_playlist_item, file_to_data_url
 
 # UI
 st.title("🎮 Upload & Play")
@@ -196,13 +192,23 @@ if media_file or funscript_file:
     playlist_item = {}
     
     if media_file:
-        playlist_item['media'] = file_to_data_url(media_file) # converts file or BytesIO to base64 data url
-        playlist_item['title'] = media_file.name
+        # Convert uploaded file to data URL
+        data_url = file_to_data_url(media_file)
+        playlist_item = create_playlist_item(
+            sources=data_url,
+            name=media_file.name
+        )
         
     if funscript_file:
-        playlist_item['funscript'] = json.loads(
-            funscript_file.getvalue().decode('utf-8')
-        )
+        funscript_data = json.loads(funscript_file.getvalue().decode('utf-8'))
+        if 'funscript' in playlist_item:
+            playlist_item['funscript'] = funscript_data
+        else:
+            playlist_item = create_playlist_item(
+                funscript=funscript_data,
+                name=funscript_file.name,
+                duration=120.0  # Default duration for haptic-only
+            )
     
     funplayer(playlist=[playlist_item])
 ```
@@ -221,8 +227,8 @@ dark_theme = {
 
 funplayer(
     playlist=[{
-        'media': 'video.mp4',
-        'funscript': 'script.funscript'
+        'sources': [{'src': 'video.mp4', 'type': 'video/mp4'}],
+        'funscript': {'actions': [...]}
     }],
     theme=dark_theme
 )
@@ -242,7 +248,7 @@ funplayer(
 │  │   (Video.js)    │ │                 │ │   (Canvas)      │    │
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘    │
 │  ┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐    │
-│  │ ButtPlugManager │ │FunscriptManager │ │  MediaManager   │    │
+│  │ ButtPlugManager │ │FunscriptManager │ │ PlaylistManager │    │
 │  │  (buttplug.js)  │ │  (interpolation)│ │  (utilities)    │    │
 │  └─────────────────┘ └─────────────────┘ └─────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
@@ -306,9 +312,9 @@ import FunPlayer from './FunPlayer';
 function App() {
   const playlist = [
     {
-      media: 'video.mp4',
+      sources: [{'src': 'video.mp4', 'type': 'video/mp4'}],
       funscript: funscriptData,
-      title: 'Scene 1'
+      name: 'Scene 1'
     }
   ];
 
@@ -325,7 +331,7 @@ function App() {
 
 ### Data Flow
 
-1. **Playlist Processing**: MediaManager converts playlist items to Video.js format
+1. **Playlist Processing**: PlaylistManager converts playlist items to Video.js format
 2. **Media Events**: Video.js fires play/pause/timeupdate events  
 3. **Haptic Loop**: 60Hz interpolation loop syncs with media time
 4. **Device Commands**: ButtPlugManager sends commands to physical devices
@@ -374,37 +380,63 @@ funscriptManager.autoMapChannels(null); // Maps to virtual actuators
 
 ```python
 funplayer(
-    playlist=None,          # List of playlist items
-    theme=None,            # Custom theme dictionary  
-    key=None               # Streamlit component key
-)
+    playlist: List[Dict[str, Any]] = None,  # List of playlist items
+    theme: Dict[str, str] = None,           # Custom theme dictionary  
+    key: str = None                         # Streamlit component key
+) -> Any
 ```
 
-### Playlist Item Format
+### Playlist Item Format (Video.js Extended)
 
 ```python
 {
-    'media': str,          # URL/path to media file (optional)
-    'funscript': dict|str, # Funscript data or URL (optional)  
-    'poster': str,         # Poster image URL (optional)
-    'title': str,          # Display title (optional)
-    'duration': float,     # Duration in seconds (for haptic-only)
-    'media_type': str,     # Force media type detection
-    'media_info': str      # Additional metadata
+    'sources': [                    # Required: Media sources
+        {
+            'src': 'video.mp4',     # URL or data URL
+            'type': 'video/mp4',    # MIME type (auto-detected if missing)
+            'label': 'HD'           # Optional quality label
+        }
+    ],
+    'funscript': dict | str,        # Optional: Funscript data or URL
+    'name': str,                    # Optional: Display title
+    'description': str,             # Optional: Description
+    'poster': str,                  # Optional: Poster image URL
+    'duration': float,              # Optional: Duration (for haptic-only)
+    'textTracks': list             # Optional: Subtitles/captions
 }
 ```
 
 ### Utility Functions
 
 ```python
-# Load funscript from file
-load_funscript(file_path: str) -> dict
+# Create playlist items with helper function
+create_playlist_item(
+    sources: Union[str, List[Dict]] = None,  # Media sources
+    funscript: Union[str, Dict] = None,      # Funscript data
+    name: str = None,                        # Item title
+    description: str = None,                 # Item description
+    poster: Union[str, BytesIO] = None,      # Poster image
+    duration: float = None,                  # Duration for haptic-only
+    **kwargs                                 # Additional Video.js properties
+) -> Dict[str, Any]
 
-# Create funscript programmatically
-create_funscript(
-    actions: list,         # [{"at": time_ms, "pos": 0-100}, ...]
-    metadata: dict = None  # Optional metadata
-) -> dict
+# Create complete playlists
+create_playlist(*items, **playlist_options) -> List[Dict[str, Any]]
+
+# Convert files to data URLs
+file_to_data_url(
+    file: Union[str, os.PathLike, BytesIO], 
+    max_size_mb: int = 200
+) -> str
+
+# Load funscript from file
+load_funscript(file_path: Union[str, os.PathLike]) -> Dict[str, Any]
+
+# Validation helpers
+validate_playlist_item(item: Dict[str, Any]) -> bool
+is_supported_media_file(filename: str) -> bool
+is_funscript_file(filename: str) -> bool
+get_file_size_mb(file: Union[str, os.PathLike, BytesIO]) -> float
 ```
 
 ## 🎯 Use Cases
