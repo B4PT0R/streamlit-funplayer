@@ -43,23 +43,23 @@ def add_item_from_bucket(name=None,description=None,media_file=None,funscript_fi
         "_id": generate_item_id()
     }
 
-    BASE = PurePosixPath("https://pub-3e61723b945d40e490d065f5b484484b.r2.dev")
+    BASE_URL = "https://pub-3e61723b945d40e490d065f5b484484b.r2.dev"
 
     if media_file:
         path=PurePosixPath(media_file)
         ext=path.suffix.lower()
         if not name:
             name=path.stem
-        media_url=BASE/path
+        media_url=f"{BASE_URL}/{media_file}"
         mime_type=ext_to_mime(ext)
-        item.update(sources=[{'src': media_url.as_posix(), 'type': mime_type}])
+        item.update(sources=[{'src': media_url, 'type': mime_type}])
 
     if funscript_file:
         path=PurePosixPath(funscript_file)
-        funscript_url=BASE/path
+        funscript_url=f"{BASE_URL}/{funscript_file}"
         if not name:
             name=path.stem
-        item.update(funscript=funscript_url.as_posix())
+        item.update(funscript=funscript_url)
 
     item.update(name=name)
 
