@@ -13,7 +13,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port,
-      cors: true,  // Active CORS
+      cors: false,  // !!!
       headers: {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',

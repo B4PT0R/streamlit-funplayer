@@ -192,8 +192,8 @@ with st.sidebar:
 
     st.subheader("I'm 18+ an willing to try with awesome NSFW content produced by [BlackTantra](https://blacktantra.net/)")
     if st.button("Yes!", type="primary", use_container_width=True):
-        lily_video_url=google_drive_direct_url("https://drive.google.com/file/d/1s5qzYcbTN08eC28ZTypJH0BDFd6AXn4g/view?usp=sharing")
-        lily_funscript_url=google_drive_direct_url("https://drive.google.com/file/d/1wshvABXObBThtRScYK1DG0cWrklWvXV5/view?usp=sharing")
+        lily_video_url="https://github.com/B4PT0R/streamlit-funplayer/releases/download/v0.1-demos/Squeeze.Training.With.Lily.1.mp4"
+        lily_funscript_url="https://github.com/B4PT0R/streamlit-funplayer/releases/download/v0.1-demos/Squeeze.Training.With.Lily.1.funscript"
 
         item={
             'sources': [{'src': lily_video_url, 'type': 'video/mp4'}],

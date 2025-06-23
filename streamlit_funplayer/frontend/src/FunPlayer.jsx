@@ -281,11 +281,8 @@ class FunPlayer extends Component {
       let data;
       if (typeof src === 'string') {
         if (src.startsWith('http') || src.startsWith('/')) {
-          const response = await fetch(src);
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-          data = await response.json();
+          // ✅ MODIFIÉ: Ajout du fallback proxy CORS
+          data = await this._fetchFunscriptWithFallback(src);
         } else {
           data = JSON.parse(src);
         }
@@ -293,16 +290,43 @@ class FunPlayer extends Component {
         data = src;
       }
       
-      // ✅ MODIFIÉ: Utilise la propriété computed
       this.funscript.load(data);
-      
-      // Auto-map avec device connecté
       const mapResult = managers.autoMapChannels();
       console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels`);
       
     } catch (error) {
       console.error('Failed to load funscript:', error);
       throw error;
+    }
+  }
+
+  // ✅ NOUVELLE MÉTHODE: Fetch avec fallback proxy
+  _fetchFunscriptWithFallback = async (url) => {
+    try {
+      // 1. Essai direct d'abord (plus rapide)
+      console.log('🔄 Loading funscript directly from:', url);
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      return await response.json();
+      
+    } catch (directError) {
+      console.warn('❌ Direct fetch failed, trying CORS proxy...', directError.message);
+      
+      try {
+        // 2. Fallback proxy CORS
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        console.log('🔄 Loading funscript via proxy:', proxyUrl);
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+          throw new Error(`Proxy HTTP ${response.status}: ${response.statusText}`);
+        }
+        return await response.json();
+        
+      } catch (proxyError) {
+        throw new Error(`Both direct and proxy loading failed. Direct: ${directError.message}, Proxy: ${proxyError.message}`);
+      }
     }
   }
 

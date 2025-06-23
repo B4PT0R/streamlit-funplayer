@@ -6,5 +6,5 @@ secondaryBackgroundColor="#402954"
 
 [server]
 port = 8501
-enableCORS = true
+enableCORS = false
 enableXsrfProtection = false
