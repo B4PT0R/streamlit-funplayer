@@ -3,8 +3,13 @@ import FunscriptManager from './FunscriptManager';
 import PlaylistManager from './PlaylistManager';
 
 /**
- * Managers - Singleton pour gérer les instances uniques
- * ✅ MODIFIÉ: Système d'événements étendu + PlaylistManager unifié
+ * Managers - Singleton centralisé pour tous les managers de l'application
+ * 
+ * ✅ ARCHITECTURE:
+ * - Lazy initialization des managers via getters
+ * - Setup événements une seule fois par manager
+ * - API simple et prévisible partout dans l'app
+ * - Méthodes combinées pour workflows complexes
  */
 class Managers {
   static instance = null;
@@ -14,15 +19,16 @@ class Managers {
       return Managers.instance;
     }
     
-    // Instances des managers
-    this.buttplug = null;
-    this.funscript = null;
-    this.playlist = null;  // ✅ NOUVEAU: PlaylistManager unifié (ex-MediaManager)
+    // ============================================================================
+    // INSTANCES PRIVÉES - Lazy initialization via getters
+    // ============================================================================
+    this._buttplug = null;
+    this._funscript = null;
+    this._playlist = null;
     
-    // Gestion de l'initialisation async
-    this.initPromises = new Map();
-    
-    // Système d'événements simple
+    // ============================================================================
+    // SYSTÈME D'ÉVÉNEMENTS - Simple et efficace
+    // ============================================================================
     this.listeners = new Set();
     
     Managers.instance = this;
@@ -36,205 +42,178 @@ class Managers {
   }
   
   // ============================================================================
-  // GETTERS - ✅ MODIFIÉ: FunscriptManager avec événements
-  // ============================================================================
-  
-  async getButtPlug() {
-    if (this.buttplug) {
-      return this.buttplug;
-    }
-    
-    if (this.initPromises.has('buttplug')) {
-      return this.initPromises.get('buttplug');
-    }
-    
-    const initPromise = this._initButtPlug();
-    this.initPromises.set('buttplug', initPromise);
-    
-    try {
-      this.buttplug = await initPromise;
-      return this.buttplug;
-    } finally {
-      this.initPromises.delete('buttplug');
-    }
-  }
-  
-  getFunscript() {
-    if (!this.funscript) {
-      this.funscript = this._initFunscript();
-    }
-    return this.funscript;
-  }
-  
-  getPlaylist() {
-    if (!this.playlist) { // ✅ Protection singleton
-      this.playlist = this._initPlaylist();
-    }
-    return this.playlist;
-  }
-  
-  // ============================================================================
-  // INITIALISATION - ✅ NOUVEAU: _initFunscript avec événements
-  // ============================================================================
-  
-  async _initButtPlug() {
-    const manager = new ButtPlugManager();
-    await manager.init();
-    
-    // Redirection des événements vers nos listeners
-    manager.onConnectionChanged = (connected) => {
-      this._notify('buttplug:connection', { connected });
-    };
-    manager.onDeviceChanged = (device) => {
-      this._notify('buttplug:device', { device });
-    };
-    manager.onError = (message, error) => {
-      this._notify('buttplug:error', { message, error });
-    };
-    manager.onConfigChanged = (key, data) => {
-      this._notify('buttplug:config', { key, data });
-    };
-    
-    return manager;
-  }
-
-  // ✅ NOUVEAU: Initialisation FunscriptManager avec événements
-  _initFunscript() {
-    const manager = new FunscriptManager();
-    
-    // ✅ NOUVEAU: Redirection des événements funscript vers le système global
-    manager.onLoad = (data) => {
-      this._notify('funscript:load', { 
-        data, 
-        channels: manager.getChannels(),
-        duration: manager.getDuration()
-      });
-    };
-    
-    manager.onReset = () => {
-      this._notify('funscript:reset', {});
-    };
-    
-    manager.onChannelsChanged = (channels) => {
-      this._notify('funscript:channels', { 
-        channels,
-        total: channels.length 
-      });
-    };
-    
-    manager.onOptionsChanged = (channel, options) => {
-      this._notify('funscript:options', { 
-        channel, 
-        options,
-        allOptions: manager.getAllOptions()
-      });
-    };
-
-    // ✅ NOUVEAU: Global scale event forwarding
-    manager.onGlobalScaleChanged = (scale) => {
-      this._notify('funscript:globalScale', { 
-        scale,
-        scalePercent: Math.round(scale * 100)
-      });
-    };
-
-    manager.onGlobalOffsetChanged = (offset) => {
-      this._notify('funscript:globalOffset', { 
-        offset,
-        offsetMs: offset * 1000 
-      });
-    };
-    
-    return manager;
-  }
-
-  // ✅ NOUVEAU: Initialisation PlaylistManager avec événements
-  _initPlaylist() {
-    const manager = new PlaylistManager();
-    
-    // ✅ NOUVEAU: Redirection des événements playlist vers le système global
-    manager.onPlaylistLoaded = (items, originalPlaylist) => {
-      this._notify('playlist:loaded', { 
-        items, 
-        originalPlaylist,
-        totalItems: items.length 
-      });
-    };
-    
-    manager.onItemChanged = (index, item, previousIndex) => {
-      this._notify('playlist:itemChanged', { 
-        index, 
-        item,
-        previousIndex,
-        hasNext: manager.canNext(),
-        hasPrevious: manager.canPrevious()
-      });
-    };
-    
-    manager.onPlaybackChanged = (playbackState) => {
-      this._notify('playlist:playbackChanged', { 
-        ...playbackState,
-        playlistInfo: manager.getPlaylistInfo()
-      });
-    };
-
-    manager.onItemUpdated = (index, item, change) => {
-      this._notify('playlist:itemUpdated', { 
-        index, 
-        item, 
-        change 
-      });
-    };
-    
-    manager.onError = (message, error) => {
-      this._notify('playlist:error', { 
-        message, 
-        error 
-      });
-    };
-    
-    return manager;
-  }
-  
-  // ============================================================================
-  // MÉTHODES COMBINÉES - ✅ MODIFIÉ: Avec événements enrichis
+  // SECTION 1: GETTERS MANAGERS - Lazy init + setup événements
   // ============================================================================
   
   /**
-   * Auto-connect : Connect + Scan + Select first + AutoMap
+   * ButtPlug Manager - Device haptic communication
+   */
+  get buttplug() {
+    if (!this._buttplug) {
+      this._buttplug = new ButtPlugManager();
+      
+      // ✅ Setup événements UNE FOIS
+      this._buttplug.onConnectionChanged = (connected) => {
+        this._notify('buttplug:connection', { connected });
+      };
+      
+      this._buttplug.onDeviceChanged = (device) => {
+        this._notify('buttplug:device', { device });
+      };
+      
+      this._buttplug.onError = (message, error) => {
+        this._notify('buttplug:error', { message, error });
+      };
+      
+      this._buttplug.onConfigChanged = (key, data) => {
+        this._notify('buttplug:config', { key, data });
+      };
+    }
+    
+    return this._buttplug;
+  }
+  
+  /**
+   * Funscript Manager - Haptic data processing
+   */
+  get funscript() {
+    if (!this._funscript) {
+      this._funscript = new FunscriptManager();
+      
+      // ✅ Setup événements UNE FOIS
+      this._funscript.onLoad = (data) => {
+        this._notify('funscript:load', { 
+          data, 
+          channels: this._funscript.getChannels(),
+          duration: this._funscript.getDuration()
+        });
+      };
+      
+      this._funscript.onReset = () => {
+        this._notify('funscript:reset', {});
+      };
+      
+      this._funscript.onChannelsChanged = (channels) => {
+        this._notify('funscript:channels', { 
+          channels,
+          total: channels.length 
+        });
+      };
+      
+      this._funscript.onOptionsChanged = (channel, options) => {
+        this._notify('funscript:options', { 
+          channel, 
+          options,
+          allOptions: this._funscript.getAllOptions()
+        });
+      };
+
+      this._funscript.onGlobalScaleChanged = (scale) => {
+        this._notify('funscript:globalScale', { 
+          scale,
+          scalePercent: Math.round(scale * 100)
+        });
+      };
+
+      this._funscript.onGlobalOffsetChanged = (offset) => {
+        this._notify('funscript:globalOffset', { 
+          offset,
+          offsetMs: offset * 1000 
+        });
+      };
+    }
+    
+    return this._funscript;
+  }
+
+  /**
+   * Playlist Manager - Media playlist handling
+   */
+  get playlist() {
+    if (!this._playlist) {
+      this._playlist = new PlaylistManager();
+      
+      // ✅ Setup événements UNE FOIS
+      this._playlist.onPlaylistLoaded = (items, originalPlaylist) => {
+        this._notify('playlist:loaded', { 
+          items, 
+          originalPlaylist,
+          totalItems: items.length 
+        });
+      };
+      
+      this._playlist.onItemChanged = (index, item, previousIndex) => {
+        this._notify('playlist:itemChanged', { 
+          index, 
+          item,
+          previousIndex,
+          hasNext: this._playlist.canNext(),
+          hasPrevious: this._playlist.canPrevious()
+        });
+      };
+      
+      this._playlist.onPlaybackChanged = (playbackState) => {
+        this._notify('playlist:playbackChanged', { 
+          ...playbackState,
+          playlistInfo: this._playlist.getPlaylistInfo()
+        });
+      };
+
+      this._playlist.onItemUpdated = (index, item, change) => {
+        this._notify('playlist:itemUpdated', { 
+          index, 
+          item, 
+          change 
+        });
+      };
+      
+      this._playlist.onError = (message, error) => {
+        this._notify('playlist:error', { 
+          message, 
+          error 
+        });
+      };
+    }
+    
+    return this._playlist;
+  }
+  
+  // ============================================================================
+  // SECTION 2: MÉTHODES COMBINÉES - Workflows complexes
+  // ============================================================================
+  
+  /**
+   * Auto-connect workflow: Connect + Scan + Select + AutoMap
    */
   async autoConnect(scanTimeout = 3000) {
     try {
-      // 1. Obtenir le manager ButtPlug
-      const buttplug = await this.getButtPlug();
-      
-      // 2. Se connecter à Intiface
-      const connected = await buttplug.connect();
+      // 1. Se connecter à Intiface
+      const connected = await this.buttplug.connect();
       if (!connected) {
         throw new Error('Failed to connect to Intiface Central');
       }
       
-      // 3. Scanner les devices
-      const devices = await buttplug.scan(scanTimeout);
+      // 2. Scanner les devices
+      const devices = await this.buttplug.scan(scanTimeout);
       if (devices.length === 0) {
         throw new Error('No devices found');
       }
       
-      // 4. Sélectionner le premier device
-      const selectSuccess = buttplug.selectDevice(devices[0].index);
+      // 3. Sélectionner le premier device
+      const selectSuccess = this.buttplug.selectDevice(devices[0].index);
       if (!selectSuccess) {
         throw new Error('Failed to select device');
       }
       
-      // 5. Auto-mapper les canaux funscript
+      // 4. Auto-mapper les canaux
       const mapResult = this.autoMapChannels();
       
-      // ✅ NOUVEAU: Événement combiné pour autoConnect réussi
+      // ✅ Événement succès
       this._notify('managers:autoConnect', {
         success: true,
         device: devices[0],
         mapResult,
-        capabilities: buttplug.getCapabilities()
+        capabilities: this.buttplug.getCapabilities()
       });
       
       return {
@@ -244,7 +223,7 @@ class Managers {
       };
       
     } catch (error) {
-      // ✅ NOUVEAU: Événement combiné pour autoConnect échoué
+      // ✅ Événement échec
       this._notify('managers:autoConnect', {
         success: false,
         error: error.message
@@ -258,14 +237,13 @@ class Managers {
   }
   
   /**
-   * Auto-map channels avec événement enrichi
+   * Auto-map channels to device actuators
    */
   autoMapChannels() {
-    const funscript = this.getFunscript();
     const capabilities = this.buttplug?.getCapabilities() || null;
-    const result = funscript.autoMapChannels(capabilities);
+    const result = this.funscript.autoMapChannels(capabilities);
     
-    // ✅ Événement spécifique pour auto-mapping
+    // ✅ Événement mapping
     this._notify('managers:autoMap', {
       result,
       capabilities,
@@ -276,14 +254,23 @@ class Managers {
   }
   
   // ============================================================================
-  // SYSTÈME D'ÉVÉNEMENTS - Inchangé
+  // SECTION 3: SYSTÈME D'ÉVÉNEMENTS - Simple et efficace
   // ============================================================================
   
+  /**
+   * Ajouter un listener d'événements
+   * @param {Function} callback - Fonction (event, data) => {}
+   * @returns {Function} - Fonction de cleanup
+   */
   addListener(callback) {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
   }
   
+  /**
+   * Notifier tous les listeners
+   * @private
+   */
   _notify(event, data) {
     console.log('🔔 Managers._notify called:', event, data);
     this.listeners.forEach(callback => {
@@ -296,49 +283,58 @@ class Managers {
   }
   
   // ============================================================================
-  // STATUS & CLEANUP - ✅ MODIFIÉ: Cleanup funscript events
+  // SECTION 4: STATUS & CLEANUP - Utilitaires
   // ============================================================================
   
+  /**
+   * Statut global de tous les managers
+   */
   getStatus() {
     return {
-      buttplug: this.buttplug?.getStatus() || { isConnected: false },
-      funscript: this.funscript?.getDebugInfo() || { loaded: false },
-      playlist: this.playlist?.getStats() || { totalItems: 0 }  // ✅ MODIFIÉ: PlaylistManager
+      buttplug: this._buttplug?.getStatus() || { isConnected: false },
+      funscript: this._funscript?.getDebugInfo() || { loaded: false },
+      playlist: this._playlist?.getStats() || { totalItems: 0 }
     };
   }
   
+  /**
+   * Cleanup complet de tous les managers
+   */
   async cleanup() {
-    // Cleanup des managers existants
-    if (this.buttplug) {
-      await this.buttplug.cleanup();
-      this.buttplug = null;
+    // Cleanup ButtPlug
+    if (this._buttplug) {
+      await this._buttplug.cleanup();
+      this._buttplug = null;
     }
     
-    // ✅ MODIFIÉ: Cleanup du PlaylistManager au lieu de MediaManager
-    if (this.playlist) {
-      this.playlist.cleanup();
-      this.playlist = null;
+    // Cleanup Playlist
+    if (this._playlist) {
+      this._playlist.cleanup();
+      this._playlist = null;
     }
     
-    // ✅ Cleanup du FunscriptManager avec événements
-    if (this.funscript) {
-      // Désactiver les callbacks avant reset pour éviter les événements parasites
-      this.funscript.onLoad = null;
-      this.funscript.onReset = null;
-      this.funscript.onChannelsChanged = null;
-      this.funscript.onOptionsChanged = null;
-      this.funscript.onGlobalOffsetChanged = null;
+    // Cleanup Funscript (désactiver callbacks avant reset)
+    if (this._funscript) {
+      this._funscript.onLoad = null;
+      this._funscript.onReset = null;
+      this._funscript.onChannelsChanged = null;
+      this._funscript.onOptionsChanged = null;
+      this._funscript.onGlobalOffsetChanged = null;
+      this._funscript.onGlobalScaleChanged = null;
       
-      this.funscript.reset();
-      this.funscript = null;
+      this._funscript.reset();
+      this._funscript = null;
     }
     
-    // Reset état
-    this.initPromises.clear();
+    // Cleanup événements
     this.listeners.clear();
+    
+    console.log('Managers: Cleanup complete');
   }
   
-  // Reset complet de l'instance (debug/dev)
+  /**
+   * Reset complet (pour debug/dev)
+   */
   static async reset() {
     if (Managers.instance) {
       await Managers.instance.cleanup();

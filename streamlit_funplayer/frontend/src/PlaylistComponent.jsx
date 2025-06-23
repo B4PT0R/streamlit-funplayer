@@ -1,17 +1,22 @@
 import React, { Component } from 'react';
-import managers from './Managers'; 
+import managers from './Managers'; // ✅ SEULE IMPORT du singleton
 
 /**
- * PlaylistComponent - ✅ NETTOYÉ: Plus de génération de thumbnails
- * Utilise directement les posters générés par PlaylistManager
+ * PlaylistComponent - ✅ REFACTORISÉ: API Managers unifiée
+ * Plus aucune référence locale aux managers, tout passe par le singleton
  */
 class PlaylistComponent extends Component {
   constructor(props) {
     super(props);
-    this.playlist = managers.getPlaylist();
+    
+    // ✅ SUPPRIMÉ: Plus de référence locale
+    // this.playlist = managers.getPlaylist(); // ❌
+    
     this.state = {
       renderTrigger: 0
     };
+    
+    this.managersListener = null;
   }
 
   componentDidMount() {    
@@ -24,17 +29,20 @@ class PlaylistComponent extends Component {
     // ✅ Cleanup du listener managers
     if (this.managersListener) {
       this.managersListener();
+      this.managersListener = null;
     }
   }
 
-  // ✅ Handler unifié via Managers
+  // ============================================================================
+  // ✅ GESTION D'ÉVÉNEMENTS VIA API MANAGERS UNIFIÉE
+  // ============================================================================
+
   handleManagerEvent = (event, data) => {
     if (event === 'playlist:loaded' || event === 'playlist:itemChanged') {
       this.handlePlaylistRefresh();
     }
   }
 
-  // ✅ CONSERVÉ: handlePlaylistRefresh reste identique
   handlePlaylistRefresh = () => {
     this._triggerRenderIfNeeded();
     if (this.props.onResize) {
@@ -43,7 +51,7 @@ class PlaylistComponent extends Component {
   };
 
   // ============================================================================
-  // ✅ HELPERS POUR PATTERN COHÉRENT
+  // ✅ HELPERS AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   _triggerRender = () => {
@@ -60,10 +68,10 @@ class PlaylistComponent extends Component {
     }
   }
 
-  // ✅ Getters pour accès direct aux données (pas de state redondant)
-  getPlaylist = () => this.playlist.getItems();
+  // ✅ MODIFIÉ: Getters avec API Managers unifiée (pas de state redondant)
+  getPlaylist = () => managers.playlist.getItems();
 
-  getCurrentIndex = () => this.playlist.getCurrentIndex();
+  getCurrentIndex = () => managers.playlist.getCurrentIndex();
 
   shouldShowPlaylist = () => {
     const playlist = this.getPlaylist();
@@ -71,11 +79,12 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ ACTIONS - Communication simplifiée
+  // ✅ ACTIONS - API MANAGERS UNIFIÉE
   // ============================================================================
 
   handleItemClick = (index) => {
-    const success = this.playlist.goTo(index);
+    // ✅ MODIFIÉ: Accès direct au singleton
+    const success = managers.playlist.goTo(index);
         
     if (!success) {
       console.error('PlaylistComponent: Failed to go to item', index);
@@ -132,7 +141,6 @@ class PlaylistComponent extends Component {
       case 'audio': info.push('AUDIO'); break;
       case 'audio_haptic': info.push('AUDIO'); break;
       case 'haptic': info.push('HAPTIC'); break;
-      // ✅ SUPPRIMÉ : case 'timeline'
     }
 
     // ✅ Durée cosmétique (sera corrigée par MediaPlayer)
@@ -151,11 +159,11 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ RENDER SIMPLIFIÉ - Plus de génération de thumbnails
+  // ✅ RENDER AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   render() {
-    // ✅ Utilise les getters au lieu du state
+    // ✅ MODIFIÉ: Utilise les getters avec API Managers unifiée
     const playlist = this.getPlaylist();
     const currentIndex = this.getCurrentIndex();
 
@@ -182,7 +190,7 @@ class PlaylistComponent extends Component {
               title={item.description || this.getItemTitle(item, index)}
             >
               
-              {/* ✅ SIMPLIFIÉ: Thumbnail utilise directement item.poster */}
+              {/* ✅ Thumbnail utilise directement item.poster (généré par PlaylistManager) */}
               <div className="fp-item-thumbnail">
                 <img 
                   src={item.poster} // ✅ Toujours défini par PlaylistManager

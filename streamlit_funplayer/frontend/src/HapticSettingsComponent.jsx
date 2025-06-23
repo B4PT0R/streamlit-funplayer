@@ -1,11 +1,11 @@
 import React, { Component } from 'react';
 import ButtPlugSettingsComponent from './ButtPlugSettingsComponent';
 import ChannelSettingsComponent from './ChannelSettingsComponent';
-import managers from './Managers';
+import managers from './Managers'; // ✅ SEULE IMPORT du singleton
 
 /**
- * HapticSettingsComponent - ✅ REFACTORISÉ: État réactif aux événements
- * Plus de state local redondant, accès direct aux managers + re-render sur événements
+ * HapticSettingsComponent - ✅ REFACTORISÉ: API Managers unifiée
+ * Plus aucune référence locale aux managers, tout passe par le singleton
  */
 class HapticSettingsComponent extends Component {
   constructor(props) {
@@ -14,29 +14,30 @@ class HapticSettingsComponent extends Component {
     // ✅ SIMPLIFIÉ: State minimal, juste pour l'UI
     this.state = {
       isExpanded: false,
-      renderTrigger: 0  // ✅ NOUVEAU: Trigger pour re-render
+      renderTrigger: 0
     };
     
     this.managersListener = null;
   }
 
   componentDidMount() {
-    // ✅ SIMPLIFIÉ: Écouter seulement les événements pour re-render
+    // ✅ Écouter les événements pour re-render
     this.managersListener = managers.addListener(this.handleManagerEvent);
   }
 
   componentWillUnmount() {
     if (this.managersListener) {
       this.managersListener();
+      this.managersListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS SIMPLIFIÉE
+  // ✅ GESTION D'ÉVÉNEMENTS AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   handleManagerEvent = (event, data) => {
-    // ✅ NOUVEAU: Re-render sur tous les événements qui impactent l'UI
+    // ✅ Re-render sur tous les événements qui impactent l'UI
     const eventsToReact = [
       'buttplug:connection',
       'buttplug:device', 
@@ -48,7 +49,7 @@ class HapticSettingsComponent extends Component {
     ];
     
     if (eventsToReact.some(e => event.startsWith(e.split(':')[0]))) {
-      // ✅ NOUVEAU: Trigger re-render via setState au lieu de forceUpdate()
+      // ✅ Trigger re-render via setState
       this.setState(prevState => ({ 
         renderTrigger: prevState.renderTrigger + 1 
       }));
@@ -59,39 +60,49 @@ class HapticSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GETTERS DIRECTS VERS MANAGERS (pour les settings expandés seulement)
+  // ✅ GETTERS AVEC API MANAGERS UNIFIÉE (pour les settings expandés seulement)
   // ============================================================================
 
   getIntifaceUrl = () => {
-    return this.buttplug?.getIntifaceUrl() || 'ws://localhost:12345';
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.buttplug?.getIntifaceUrl() || 'ws://localhost:12345';
   }
 
   getFunscriptChannels = () => {
-    const funscript = managers.getFunscript();
-    return funscript?.getChannels() || [];
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.funscript?.getChannels() || [];
   }
 
   getCapabilities = () => {
-    return this.buttplug?.getCapabilities() || null;
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.buttplug?.getCapabilities() || null;
   }
 
   getGlobalScale = () => {
-    const funscript = managers.getFunscript();
-    return funscript?.getGlobalScale() || 1.0;
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.funscript?.getGlobalScale() || 1.0;
   }
 
-  // ✅ NOUVEAU: Propriété computed pour buttplug (avec cache)
-  get buttplug() {
-    return managers.buttplug;
+  getUpdateRate = () => {
+    return this.props.onGetUpdateRate?.() || 60;
   }
+
+  getGlobalOffset = () => {
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.funscript?.getGlobalOffset() || 0;
+  }
+
+  // ✅ SUPPRIMÉ: Plus de propriété computed buttplug
+  // get buttplug() { return managers.buttplug; } // ❌
 
   // ============================================================================
-  // ACTIONS - ✅ MODIFIÉ: Seulement les actions locales
+  // ACTIONS - ✅ MODIFIÉ: Appels directs au singleton
   // ============================================================================
 
   handleIntifaceUrlChange = (newUrl) => {
-    if (this.buttplug) {
-      this.buttplug.setIntifaceUrl(newUrl);
+    // ✅ MODIFIÉ: Accès direct au singleton
+    if (managers.buttplug) {
+      managers.buttplug.setIntifaceUrl(newUrl);
       // ✅ L'événement 'buttplug:config' sera déclenché automatiquement
       this.props.onSettingsChange?.(null, 'intifaceUrl', newUrl);
     }
@@ -104,6 +115,7 @@ class HapticSettingsComponent extends Component {
   }
 
   handleAutoMap = () => {
+    // ✅ MODIFIÉ: Accès direct au singleton
     const mapResult = managers.autoMapChannels();
     this.props.onSettingsChange?.(null, 'autoMap', mapResult);
   }
@@ -113,41 +125,28 @@ class HapticSettingsComponent extends Component {
   }
 
   handleGlobalScaleChange = (scale) => {
-    const funscript = managers.getFunscript();
-    funscript.setGlobalScale(scale);
+    // ✅ MODIFIÉ: Accès direct au singleton
+    managers.funscript.setGlobalScale(scale);
     // ✅ L'événement 'funscript:globalScale' sera déclenché automatiquement
     this.props.onSettingsChange?.(null, 'globalScale', scale);
   }
 
   handleGlobalOffsetChange = (offset) => {
-    const funscript = managers.getFunscript();
-    funscript.setGlobalOffset(offset);
+    // ✅ MODIFIÉ: Accès direct au singleton
+    managers.funscript.setGlobalOffset(offset);
     // ✅ L'événement 'funscript:globalOffset' sera déclenché automatiquement
     this.props.onSettingsChange?.(null, 'globalOffset', offset);
   }
 
   handleChannelSettingsChange = (channel, key, value) => {
-    const funscript = managers.getFunscript();
-    funscript.setOptions(channel, { [key]: value });
+    // ✅ MODIFIÉ: Accès direct au singleton
+    managers.funscript.setOptions(channel, { [key]: value });
     // ✅ L'événement 'funscript:options' sera déclenché automatiquement
     this.props.onSettingsChange?.(channel, key, value);
   }
 
   // ============================================================================
-  // GETTERS - ✅ MODIFIÉ: Accès direct aux managers
-  // ============================================================================
-
-  getUpdateRate = () => {
-    return this.props.onGetUpdateRate?.() || 60;
-  }
-
-  getGlobalOffset = () => {
-    const funscript = managers.getFunscript();
-    return funscript?.getGlobalOffset() || 0;
-  }
-
-  // ============================================================================
-  // RENDER - ✅ MODIFIÉ: Utilise les getters au lieu du state
+  // RENDER - ✅ MODIFIÉ: Utilise les getters avec API Managers unifiée
   // ============================================================================
 
   renderExpandedSettings() {
@@ -168,7 +167,7 @@ class HapticSettingsComponent extends Component {
           <h6 className="fp-title">⚙️ Connection</h6>
         </div>
         
-        {/* ✅ MODIFIÉ: Intiface URL + Update Rate - Same line for compactness */}
+        {/* ✅ Intiface URL + Update Rate - Same line for compactness */}
         <div className="fp-layout-row fp-mb-lg">
           
           {/* Intiface WebSocket URL */}
@@ -192,7 +191,8 @@ class HapticSettingsComponent extends Component {
               </button>
             </div>
             <span className="fp-unit" style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-              {this.buttplug?.isConnected ? 
+              {/* ✅ MODIFIÉ: Accès direct au singleton */}
+              {managers.buttplug?.isConnected ? 
                 `✅ Connected to ${intifaceUrl}` : 
                 `⚠️ Not connected`
               }
@@ -221,7 +221,7 @@ class HapticSettingsComponent extends Component {
           
         </div>
 
-        {/* ✅ NOUVEAU: Divider to separate connection settings from haptic controls */}
+        {/* ✅ Divider to separate connection settings from haptic controls */}
         <div className="fp-divider"></div>
 
         <div className="fp-layout-horizontal fp-mb-sm">
@@ -289,7 +289,7 @@ class HapticSettingsComponent extends Component {
           
         </div>
 
-        {/* Channel Mapping section continues unchanged... */}
+        {/* Channel Mapping section */}
         {funscriptChannels.length > 0 && (
           <>
             <div className="fp-divider"></div>
@@ -323,7 +323,7 @@ class HapticSettingsComponent extends Component {
   }
 
   render() {
-    // ✅ MODIFIÉ: Seul l'état local UI est nécessaire
+    // ✅ Seul l'état local UI est nécessaire
     const { isExpanded } = this.state;
     
     return (

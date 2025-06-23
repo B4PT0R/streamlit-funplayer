@@ -1,9 +1,9 @@
 import React, { Component } from 'react';
-import managers from './Managers';
+import managers from './Managers'; // ✅ SEULE IMPORT du singleton
 
 /**
- * ButtPlugSettingsComponent - ✅ REFACTORISÉ: Réactif aux événements
- * Plus de props redondantes, accès direct aux managers + événements
+ * ButtPlugSettingsComponent - ✅ REFACTORISÉ: API Managers unifiée
+ * Plus aucune référence locale aux managers, tout passe par le singleton
  */
 class ButtPlugSettingsComponent extends Component {
   constructor(props) {
@@ -11,29 +11,30 @@ class ButtPlugSettingsComponent extends Component {
     
     this.state = {
       isAutoConnecting: false,
-      renderTrigger: 0  // ✅ NOUVEAU: Trigger pour re-render
+      renderTrigger: 0
     };
     
     this.managersListener = null;
   }
 
   componentDidMount() {
-    // ✅ NOUVEAU: Écouter les événements pour re-render
+    // ✅ Écouter les événements pour re-render
     this.managersListener = managers.addListener(this.handleManagerEvent);
   }
 
   componentWillUnmount() {
     if (this.managersListener) {
       this.managersListener();
+      this.managersListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS
+  // ✅ GESTION D'ÉVÉNEMENTS AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   handleManagerEvent = (event, data) => {
-    // ✅ NOUVEAU: Re-render sur événements qui impactent ce composant
+    // ✅ Re-render sur événements qui impactent ce composant
     const eventsToReact = [
       'buttplug:connection',     // État de connexion changé
       'buttplug:device',         // Device sélectionné changé
@@ -48,7 +49,7 @@ class ButtPlugSettingsComponent extends Component {
         renderTrigger: prevState.renderTrigger + 1 
       }));
       
-      // ✅ NOUVEAU: Gérer la fin d'autoConnect
+      // ✅ Gérer la fin d'autoConnect
       if (event === 'managers:autoConnect') {
         this.setState({ isAutoConnecting: false });
       }
@@ -56,37 +57,35 @@ class ButtPlugSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GETTERS - Accès direct aux managers (remplace les props)
+  // ✅ GETTERS AVEC API MANAGERS UNIFIÉE (remplace les props)
   // ============================================================================
 
   getButtPlugStatus = () => {
-    // ✅ Accès direct via la propriété computed du manager
-    return this.buttplug?.getStatus() || { isConnected: false };
+    // ✅ MODIFIÉ: Accès direct via le singleton
+    return managers.buttplug?.getStatus() || { isConnected: false };
   }
 
   getFunscriptChannels = () => {
-    const funscript = managers.getFunscript();
-    return funscript?.getChannels() || [];
+    // ✅ MODIFIÉ: Accès direct via le singleton
+    return managers.funscript?.getChannels() || [];
   }
 
   getDevices = () => {
-    return this.buttplug?.getDevices() || [];
+    // ✅ MODIFIÉ: Accès direct via le singleton
+    return managers.buttplug?.getDevices() || [];
   }
 
   getSelectedDevice = () => {
-    return this.buttplug?.getSelected() || null;
+    // ✅ MODIFIÉ: Accès direct via le singleton
+    return managers.buttplug?.getSelected() || null;
   }
 
-  // ✅ NOUVEAU: Propriété computed pour buttplug (avec cache)
-  get buttplug() {
-    return managers.buttplug;
-  }
+  // ✅ SUPPRIMÉ: Plus de propriété computed buttplug
+  // get buttplug() { return managers.buttplug; } // ❌
 
   // ============================================================================
-  // ✅ MODIFIÉ: ACTIONS - Appels directs au lieu de callbacks props
+  // ✅ ACTIONS - Appels directs au singleton
   // ============================================================================
-
-
 
   handleAutoConnect = async () => {
     if (this.state.isAutoConnecting) return;
@@ -106,9 +105,9 @@ class ButtPlugSettingsComponent extends Component {
 
   handleDisconnect = async () => {
     try {
-      // ✅ MODIFIÉ: Accès direct via propriété computed
-      if (this.buttplug) {
-        await this.buttplug.disconnect();
+      // ✅ MODIFIÉ: Accès direct via le singleton
+      if (managers.buttplug) {
+        await managers.buttplug.disconnect();
         // ✅ L'événement 'buttplug:connection' sera déclenché automatiquement
       }
     } catch (error) {
@@ -118,10 +117,10 @@ class ButtPlugSettingsComponent extends Component {
 
   handleDeviceChange = async (deviceIndex) => {
     try {
-      // ✅ MODIFIÉ: Accès direct via propriété computed  
-      if (this.buttplug) {
+      // ✅ MODIFIÉ: Accès direct via le singleton
+      if (managers.buttplug) {
         const numericIndex = deviceIndex === '' ? null : parseInt(deviceIndex);
-        const success = this.buttplug.selectDevice(numericIndex);
+        const success = managers.buttplug.selectDevice(numericIndex);
         
         if (success && numericIndex !== null) {
           // Auto-map après sélection
@@ -135,7 +134,7 @@ class ButtPlugSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: RENDER - Utilise les getters au lieu des props
+  // ✅ RENDER - Utilise les getters avec API Managers unifiée
   // ============================================================================
 
   render() {
@@ -144,7 +143,7 @@ class ButtPlugSettingsComponent extends Component {
       isSettingsExpanded 
     } = this.props;
     
-    // ✅ MODIFIÉ: Données récupérées via getters au lieu de props
+    // ✅ MODIFIÉ: Données récupérées via getters avec API Managers unifiée
     const { isAutoConnecting } = this.state;
     const buttplugStatus = this.getButtPlugStatus();
     const funscriptChannels = this.getFunscriptChannels();

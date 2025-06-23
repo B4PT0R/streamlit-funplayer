@@ -583,6 +583,23 @@ class PlaylistManager {
     }
   }
 
+  updateCurrentItemDuration = (realDuration) => {
+    const currentItem = this.getCurrentItem();
+    if (!currentItem) return false;
+    
+    const oldDuration = currentItem.duration;
+    currentItem.duration = realDuration;
+    
+    // ✅ Notifier le changement pour re-render PlaylistComponent
+    this._notifyItemUpdated(this.currentIndex, currentItem, { 
+      field: 'duration', 
+      oldValue: oldDuration, 
+      newValue: realDuration 
+    });
+    
+    return true;
+  }
+
   // ============================================================================
   // SECTION 6: SYSTÈME D'ÉVÉNEMENTS PRIVÉ
   // ============================================================================
@@ -609,6 +626,16 @@ class PlaylistManager {
       }
     } else {
       console.warn('📻 PlaylistManager: onItemChanged callback not set!');
+    }
+  }
+
+  _notifyItemUpdated = (index, item, change) => {
+    if (this.onItemUpdated && typeof this.onItemUpdated === 'function') {
+      try {
+        this.onItemUpdated(index, { ...item }, change);
+      } catch (error) {
+        console.error('PlaylistManager: onItemUpdated callback error:', error);
+      }
     }
   }
 

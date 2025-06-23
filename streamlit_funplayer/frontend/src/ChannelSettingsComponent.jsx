@@ -1,9 +1,9 @@
 import React, { Component } from 'react';
-import managers from './Managers';
+import managers from './Managers'; // ✅ SEULE IMPORT du singleton
 
 /**
- * ChannelSettingsComponent - ✅ REFACTORISÉ: Réactif aux événements
- * Plus d'accès directs aux managers, utilise le système d'événements
+ * ChannelSettingsComponent - ✅ REFACTORISÉ: API Managers unifiée
+ * Plus aucune référence locale aux managers, tout passe par le singleton
  */
 class ChannelSettingsComponent extends Component {
   constructor(props) {
@@ -11,29 +11,30 @@ class ChannelSettingsComponent extends Component {
     
     this.state = {
       isExpanded: false,
-      renderTrigger: 0  // ✅ NOUVEAU: Trigger pour re-render
+      renderTrigger: 0
     };
     
     this.managersListener = null;
   }
 
   componentDidMount() {
-    // ✅ NOUVEAU: Écouter les événements pour re-render
+    // ✅ Écouter les événements pour re-render
     this.managersListener = managers.addListener(this.handleManagerEvent);
   }
 
   componentWillUnmount() {
     if (this.managersListener) {
       this.managersListener();
+      this.managersListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: GESTION D'ÉVÉNEMENTS
+  // ✅ GESTION D'ÉVÉNEMENTS AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   handleManagerEvent = (event, data) => {
-    // ✅ NOUVEAU: Re-render sur événements qui impactent ce canal
+    // ✅ Re-render sur événements qui impactent ce canal
     const eventsToReact = [
       'funscript:options',     // Options de canal modifiées
       'buttplug:device',       // Device changé (actuators changent)
@@ -54,16 +55,16 @@ class ChannelSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: ACTIONS - Plus de calls onSettingsChange superflus
+  // ✅ ACTIONS - API MANAGERS UNIFIÉE
   // ============================================================================
 
   updateChannelOption = (key, value) => {
     const { channel } = this.props;
-    const funscript = managers.getFunscript();
     
-    if (!funscript) return;
+    // ✅ MODIFIÉ: Accès direct au singleton
+    if (!managers.funscript) return;
     
-    funscript.setOptions(channel, { [key]: value });
+    managers.funscript.setOptions(channel, { [key]: value });
     // ✅ L'événement 'funscript:options' sera déclenché automatiquement
     // ✅ Le re-render se fera via handleManagerEvent
     
@@ -73,11 +74,11 @@ class ChannelSettingsComponent extends Component {
 
   resetChannel = () => {
     const { channel } = this.props;
-    const funscript = managers.getFunscript();
     
-    if (!funscript) return;
+    // ✅ MODIFIÉ: Accès direct au singleton
+    if (!managers.funscript) return;
     
-    funscript.resetOptions(channel);
+    managers.funscript.resetOptions(channel);
     // ✅ L'événement 'funscript:options' sera déclenché automatiquement
     
     // ✅ CONSERVÉ: Notifier le parent
@@ -85,13 +86,14 @@ class ChannelSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: GETTERS - Accès direct simplifié
+  // ✅ GETTERS AVEC API MANAGERS UNIFIÉE
   // ============================================================================
 
   getChannelOptions = () => {
     const { channel } = this.props;
-    const funscript = managers.getFunscript();
-    return funscript?.getOptions(channel) || {};
+    
+    // ✅ MODIFIÉ: Accès direct au singleton
+    return managers.funscript?.getOptions(channel) || {};
   }
 
   getActuatorOptions = () => {
@@ -124,7 +126,7 @@ class ChannelSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // RENDER METHODS - ✅ INCHANGÉ: Utilise les getters
+  // RENDER METHODS - ✅ Utilise les getters avec API Managers unifiée
   // ============================================================================
 
   handleToggleExpanded = () => {
