@@ -3,10 +3,6 @@
 🎮 FunPlayer - Synchronized Media & Haptic Playback
 A modern Streamlit demo showcasing Video.js extended format with haptic funscripts
 """
-
-from re import M
-
-from sympy import Max
 import streamlit as st
 import json
 import uuid
