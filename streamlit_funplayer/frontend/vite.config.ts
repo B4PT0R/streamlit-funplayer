@@ -13,6 +13,11 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     server: {
       port,
+      cors: true,  // Active CORS
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET,HEAD,OPTIONS',
+      }
     },
     build: {
       outDir: "build",

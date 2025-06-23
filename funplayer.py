@@ -4,6 +4,9 @@
 A modern Streamlit demo showcasing Video.js extended format with haptic funscripts
 """
 
+from re import M
+
+from sympy import Max
 import streamlit as st
 import json
 import uuid
@@ -17,6 +20,7 @@ try:
         file_to_data_url, 
         load_funscript,
         validate_playlist_item,
+        google_drive_direct_url,
         __version__ as version
     )
 except ImportError:
@@ -85,11 +89,12 @@ EXAMPLE_PLAYLISTS = {
         {
             'funscript': DEMO_FUNSCRIPT,
             'name': 'Pure Haptic Experience',
-            'description': 'Haptic-only playback (no media)',
-            'duration': 11.0
+            'description': 'Haptic-only playback (no media)'
         }
     ]
 }
+
+
 
 # ============================================================================
 # UTILITY FUNCTIONS - INCHANGÉ
@@ -186,6 +191,27 @@ with st.sidebar:
             st.session_state.playlist = []
             st.session_state.demo_loaded = False
             st.rerun()
+
+    st.divider()
+
+    st.subheader("I'm 18+ an willing to try with awesome NSFW content produced by [BlackTantra](https://blacktantra.net/)")
+    if st.button("Yes!", type="primary", use_container_width=True):
+        lily_video_url=google_drive_direct_url("https://drive.google.com/file/d/1s5qzYcbTN08eC28ZTypJH0BDFd6AXn4g/view?usp=sharing")
+        lily_funscript_url=google_drive_direct_url("https://drive.google.com/file/d/1wshvABXObBThtRScYK1DG0cWrklWvXV5/view?usp=sharing")
+
+        item={
+            'sources': [{'src': lily_video_url, 'type': 'video/mp4'}],
+            'funscript': lily_funscript_url,
+            'name': 'Squeeze Training With Lily #1',
+            'description': 'Haptic-only playback (no media)',
+        }
+        item_copy = item.copy()
+        item_copy['_id'] = generate_item_id()
+        st.session_state.playlist.append(item_copy)
+        st.session_state.demo_loaded = True
+        st.rerun()
+
+    st.divider()
     
     if st.session_state.demo_loaded:
         st.success("✅ Demo examples loaded!")
@@ -461,7 +487,6 @@ playlist = [{
     'description': 'Scene description',                      # Optional
     'poster': 'poster.jpg',                                  # Optional
     'funscript': {'actions': [...]},                         # FunPlayer extension
-    'duration': 120.5                                        # For haptic-only
 }]
     """, language="python")
 

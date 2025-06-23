@@ -1,0 +1,10 @@
+[theme]
+base="dark"
+primaryColor="#d742dc"
+backgroundColor="#1b0f1e"
+secondaryBackgroundColor="#402954"
+
+[server]
+port = 8501
+enableCORS = true
+enableXsrfProtection = false

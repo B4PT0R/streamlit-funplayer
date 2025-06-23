@@ -401,6 +401,44 @@ def is_funscript_file(filename: str) -> bool:
     extension = Path(filename).suffix.lower()
     return extension in {'.funscript', '.json'}
 
+def google_drive_direct_url(share_url):
+    """
+    Convertit une URL de partage Google Drive en URL de téléchargement direct
+    
+    Args:
+        share_url: URL de partage Google Drive
+        
+    Returns:
+        URL de téléchargement direct ou None si invalide
+        
+    Examples:
+        >>> url = "https://drive.google.com/file/d/1XYZ123/view?usp=sharing"
+        >>> google_drive_direct_url(url)
+        "https://drive.google.com/uc?export=download&id=1XYZ123"
+    """
+    if not share_url or not isinstance(share_url, str):
+        return None
+    
+    # Différents patterns d'URLs Google Drive
+    import re
+    
+    # Pattern principal: /file/d/FILE_ID/view
+    match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', share_url)
+    if match:
+        file_id = match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Pattern alternatif: ?id=FILE_ID
+    match = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', share_url)
+    if match:
+        file_id = match.group(1)
+        return f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # Si c'est déjà une URL directe, la retourner
+    if 'drive.google.com/uc?export=download' in share_url:
+        return share_url
+    
+    return None
 
 # ============================================================================
 # COMPOSANT PRINCIPAL - ✅ NOUVEAU: Format Video.js étendu uniquement
