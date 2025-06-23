@@ -143,10 +143,9 @@ class PlaylistManager {
           itemType = 'media'; // HLS, DASH, etc.
         }
       } else if (item.funscript) {
-        itemType = 'haptic'; // ✅ Pur haptique (avant audio silencieux)
-      } else if (item.duration) {
-        itemType = 'timeline';
+        itemType = 'haptic'; // ✅ Toujours un audio silencieux après
       }
+      // ✅ SUPPRIMÉ : Plus de cas timeline (filtré en amont)
       
       return {
         ...item,

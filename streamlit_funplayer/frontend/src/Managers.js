@@ -177,6 +177,14 @@ class Managers {
         playlistInfo: manager.getPlaylistInfo()
       });
     };
+
+    manager.onItemUpdated = (index, item, change) => {
+      this._notify('playlist:itemUpdated', { 
+        index, 
+        item, 
+        change 
+      });
+    };
     
     manager.onError = (message, error) => {
       this._notify('playlist:error', { 

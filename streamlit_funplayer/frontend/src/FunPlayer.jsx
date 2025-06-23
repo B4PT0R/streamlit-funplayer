@@ -350,6 +350,13 @@ class FunPlayer extends Component {
 
   handleMediaLoadEnd = (data) => {
     console.log('Media loaded:', data);
+    
+    const currentItem = this.playlist.getCurrentItem();
+    if (currentItem && Math.abs((currentItem.duration || 0) - data.duration) > 1) {
+      console.log(`Correcting duration: ${currentItem.duration}s → ${data.duration}s`);
+      this.playlist.updateCurrentItemDuration(data.duration);
+    }
+    
     this.setState({ isReady: true }, () => {
       this.setStatus(`Media ready (${data.duration?.toFixed(1)}s)`);
       this.triggerResize();

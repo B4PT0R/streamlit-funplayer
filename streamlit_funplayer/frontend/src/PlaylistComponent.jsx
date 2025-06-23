@@ -125,47 +125,24 @@ class PlaylistComponent extends Component {
   getItemInfo = (item) => {
     const info = [];
 
-    // ✅ MODIFIÉ : Utiliser item_type au lieu de détecter depuis sources
+    // Type detection...
     switch (item.item_type) {
-      case 'video':
-        info.push('VIDEO');
-        break;
-      case 'video_haptic':
-        info.push('VIDEO');
-        break;
-      case 'audio':
-        info.push('AUDIO');
-        break;
-      case 'audio_haptic':
-        info.push('AUDIO');
-        break;
-      case 'haptic':
-        info.push('HAPTIC'); // ✅ Correct même après audio silencieux
-        break;
-      case 'timeline':
-        info.push('TIMELINE');
-        break;
-      default:
-        // Fallback à l'ancienne méthode si pas de type
-        if (item.sources && item.sources.length > 0) {
-          const firstSource = item.sources[0];
-          if (firstSource.type) {
-            const mimeType = firstSource.type.toLowerCase();
-            if (mimeType.startsWith('video/')) info.push('VIDEO');
-            else if (mimeType.startsWith('audio/')) info.push('AUDIO');
-            else info.push('MEDIA');
-          }
-        }
+      case 'video': info.push('VIDEO'); break;
+      case 'video_haptic': info.push('VIDEO'); break;
+      case 'audio': info.push('AUDIO'); break;
+      case 'audio_haptic': info.push('AUDIO'); break;
+      case 'haptic': info.push('HAPTIC'); break;
+      // ✅ SUPPRIMÉ : case 'timeline'
     }
 
-    // Durée si fournie
+    // ✅ Durée cosmétique (sera corrigée par MediaPlayer)
     if (item.duration) {
       const minutes = Math.floor(item.duration / 60);
       const seconds = Math.floor(item.duration % 60);
       info.push(`${minutes}:${seconds.toString().padStart(2, '0')}`);
     }
 
-    // Haptic indicator pour tous les types avec funscript
+    // Haptic indicator
     if (['video_haptic', 'audio_haptic', 'haptic'].includes(item.item_type)) {
       info.push('🎮');
     }
