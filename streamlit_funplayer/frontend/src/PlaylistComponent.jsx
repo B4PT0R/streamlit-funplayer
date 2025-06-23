@@ -2,8 +2,8 @@ import React, { Component } from 'react';
 import managers from './Managers'; 
 
 /**
- * PlaylistComponent - ✅ OPTIMISÉ: Pattern cohérent + state simplifié
- * Utilise directement les props + renderTrigger pour cohérence
+ * PlaylistComponent - ✅ NETTOYÉ: Plus de génération de thumbnails
+ * Utilise directement les posters générés par PlaylistManager
  */
 class PlaylistComponent extends Component {
   constructor(props) {
@@ -15,19 +15,19 @@ class PlaylistComponent extends Component {
   }
 
   componentDidMount() {    
-    // ✅ NOUVEAU: Utiliser le système d'événements Managers
+    // ✅ Utiliser le système d'événements Managers
     this.managersListener = managers.addListener(this.handleManagerEvent);
     this._triggerRenderIfNeeded();
   }
 
   componentWillUnmount() {
-    // ✅ MODIFIÉ: Cleanup du listener managers
+    // ✅ Cleanup du listener managers
     if (this.managersListener) {
       this.managersListener();
     }
   }
 
-  // ✅ NOUVEAU: Handler unifié via Managers
+  // ✅ Handler unifié via Managers
   handleManagerEvent = (event, data) => {
     if (event === 'playlist:loaded' || event === 'playlist:itemChanged') {
       this.handlePlaylistRefresh();
@@ -43,7 +43,7 @@ class PlaylistComponent extends Component {
   };
 
   // ============================================================================
-  // ✅ NOUVEAU: HELPERS POUR PATTERN COHÉRENT
+  // ✅ HELPERS POUR PATTERN COHÉRENT
   // ============================================================================
 
   _triggerRender = () => {
@@ -60,7 +60,7 @@ class PlaylistComponent extends Component {
     }
   }
 
-  // ✅ NOUVEAU: Getters pour accès direct aux données (pas de state redondant)
+  // ✅ Getters pour accès direct aux données (pas de state redondant)
   getPlaylist = () => this.playlist.getItems();
 
   getCurrentIndex = () => this.playlist.getCurrentIndex();
@@ -71,11 +71,10 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: ACTIONS - Communication simplifiée
+  // ✅ ACTIONS - Communication simplifiée
   // ============================================================================
 
   handleItemClick = (index) => {
-    
     const success = this.playlist.goTo(index);
         
     if (!success) {
@@ -84,46 +83,8 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: MÉTADONNÉES - Utilise les getters
+  // ✅ MÉTADONNÉES - Utilise les getters
   // ============================================================================
-
-  generateFallbackThumbnail = (item, index) => {
-    // Déterminer le type et l'icône
-    let icon = '📄';
-    let bgColor = '#6B7280';
-
-    // ✅ Utiliser sources au lieu de media (format Video.js étendu)
-    if (item.sources && item.sources.length > 0) {
-      const firstSource = item.sources[0];
-      const srcLower = firstSource.src.toLowerCase();
-      const typeLower = (firstSource.type || '').toLowerCase();
-      
-      // Vérifier par type MIME d'abord
-      if (typeLower.startsWith('audio/') || 
-          ['.mp3', '.wav', '.ogg', '.m4a', '.aac'].some(ext => srcLower.includes(ext))) {
-        icon = '🎵';
-        bgColor = '#10B981';
-      } else if (typeLower.startsWith('video/') || 
-                 ['.mp4', '.webm', '.mov', '.avi', '.mkv'].some(ext => srcLower.includes(ext))) {
-        icon = '🎥';
-        bgColor = '#3B82F6';
-      }
-    } else if (item.funscript) {
-      // Funscript seul (pas de sources)
-      icon = '🎮';
-      bgColor = '#8B5CF6';
-    } else if (item.duration) {
-      // Timeline mode
-      icon = '⏱️';
-      bgColor = '#F59E0B';
-    }
-
-    // ✅ Créer un SVG sans btoa() pour éviter les erreurs Unicode
-    const svg = `<svg width="48" height="32" xmlns="http://www.w3.org/2000/svg"><rect width="48" height="32" fill="${bgColor}" rx="4"/><text x="24" y="20" text-anchor="middle" fill="white" font-size="16" font-family="system-ui">${icon}</text></svg>`;
-    
-    // ✅ Encoder manuellement sans btoa()
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-  }
 
   getItemTitle = (item, index) => {
     // ✅ Priorité name > title (format Video.js étendu)
@@ -164,40 +125,37 @@ class PlaylistComponent extends Component {
   getItemInfo = (item) => {
     const info = [];
 
-    // ✅ Détecter le type depuis sources
-    if (item.sources && item.sources.length > 0) {
-      const firstSource = item.sources[0];
-      
-      // Type de media explicite depuis le type MIME
-      if (firstSource.type) {
-        const mimeType = firstSource.type.toLowerCase();
-        if (mimeType.startsWith('video/')) {
-          info.push('VIDEO');
-        } else if (mimeType.startsWith('audio/')) {
-          info.push('AUDIO');
-        } else if (mimeType.includes('mpegurl')) {
-          info.push('HLS');
-        } else if (mimeType.includes('dash')) {
-          info.push('DASH');
-        } else {
-          info.push('MEDIA');
-        }
-      } else {
-        // Fallback : détecter par extension
-        if (firstSource.src.startsWith('data:')) {
-          info.push('UPLOADED');
-        } else {
-          const ext = firstSource.src.split('.').pop().toUpperCase();
-          info.push(ext);
-        }
-      }
-    } else {
-      // Pas de sources = timeline/haptic mode
-      if (item.duration) {
+    // ✅ MODIFIÉ : Utiliser item_type au lieu de détecter depuis sources
+    switch (item.item_type) {
+      case 'video':
+        info.push('VIDEO');
+        break;
+      case 'video_haptic':
+        info.push('VIDEO');
+        break;
+      case 'audio':
+        info.push('AUDIO');
+        break;
+      case 'audio_haptic':
+        info.push('AUDIO');
+        break;
+      case 'haptic':
+        info.push('HAPTIC'); // ✅ Correct même après audio silencieux
+        break;
+      case 'timeline':
         info.push('TIMELINE');
-      } else {
-        info.push('HAPTIC');
-      }
+        break;
+      default:
+        // Fallback à l'ancienne méthode si pas de type
+        if (item.sources && item.sources.length > 0) {
+          const firstSource = item.sources[0];
+          if (firstSource.type) {
+            const mimeType = firstSource.type.toLowerCase();
+            if (mimeType.startsWith('video/')) info.push('VIDEO');
+            else if (mimeType.startsWith('audio/')) info.push('AUDIO');
+            else info.push('MEDIA');
+          }
+        }
     }
 
     // Durée si fournie
@@ -207,8 +165,8 @@ class PlaylistComponent extends Component {
       info.push(`${minutes}:${seconds.toString().padStart(2, '0')}`);
     }
 
-    // Haptic indicator
-    if (item.funscript) {
+    // Haptic indicator pour tous les types avec funscript
+    if (['video_haptic', 'audio_haptic', 'haptic'].includes(item.item_type)) {
       info.push('🎮');
     }
 
@@ -216,11 +174,11 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ MODIFIÉ: RENDER - Utilise les getters au lieu du state
+  // ✅ RENDER SIMPLIFIÉ - Plus de génération de thumbnails
   // ============================================================================
 
   render() {
-    // ✅ MODIFIÉ: Utilise les getters au lieu du state
+    // ✅ Utilise les getters au lieu du state
     const playlist = this.getPlaylist();
     const currentIndex = this.getCurrentIndex();
 
@@ -247,16 +205,15 @@ class PlaylistComponent extends Component {
               title={item.description || this.getItemTitle(item, index)}
             >
               
-              {/* ✅ Miniature avec fallback intelligent */}
+              {/* ✅ SIMPLIFIÉ: Thumbnail utilise directement item.poster */}
               <div className="fp-item-thumbnail">
                 <img 
-                  src={item.poster || this.generateFallbackThumbnail(item, index)} 
+                  src={item.poster} // ✅ Toujours défini par PlaylistManager
                   alt={this.getItemTitle(item, index)}
-                  onLoad={() => console.log(`🖼️ Thumbnail loaded for item ${index}`)}
                   onError={(e) => { 
-                    console.warn(`❌ Thumbnail failed to load for item ${index}, using fallback`);
-                    // Si le poster échoue, utiliser le fallback
-                    e.target.src = this.generateFallbackThumbnail(item, index);
+                    // ✅ Fallback d'urgence si même le SVG échoue
+                    e.target.style.display = 'none';
+                    e.target.parentElement.innerHTML = '📄';
                   }}
                 />
               </div>

@@ -83,13 +83,16 @@ class PlaylistManager {
     // 1. Filtrer les items valides
     const validItems = this.filterValidItems(playlist);
     
-    // 2. Enrichir avec des posters générés
-    const enrichedPlaylist = await this.enrichPlaylistWithPosters(validItems);
+    // 2. ✅ NOUVEAU : Marquer les types originaux
+    const withTypes = this.markItemTypes(validItems);
     
-    // 3. Traiter les cas sans media (funscript seul)
-    const withMedia = this.processNoMediaItems(enrichedPlaylist);
+    // 3. Générer fallbacks SVG
+    const withFallbacks = this.addFallbackPosters(withTypes);
     
-    // 4. Normaliser les sources (autodétection types MIME)
+    // 4. Traiter les cas sans media (funscript seul)
+    const withMedia = this.processNoMediaItems(withFallbacks);
+    
+    // 5. Normaliser les sources
     const normalizedPlaylist = this.normalizeSources(withMedia);
     
     console.log('PlaylistManager: Playlist processing complete');
@@ -120,6 +123,35 @@ class PlaylistManager {
       // ❌ INVALIDE: Item vide
       console.warn(`PlaylistManager: Filtering out empty item ${index + 1}`);
       return false;
+    });
+  }
+
+  // ✅ NOUVELLE FONCTION : Marquer les types avant enrichissement
+  markItemTypes = (playlist) => {
+    return playlist.map(item => {
+      let itemType = 'unknown';
+      
+      if (item.sources && item.sources.length > 0) {
+        const firstSource = item.sources[0];
+        const typeLower = (firstSource.type || this.detectMimeType(firstSource.src)).toLowerCase();
+        
+        if (typeLower.startsWith('video/')) {
+          itemType = item.funscript ? 'video_haptic' : 'video';
+        } else if (typeLower.startsWith('audio/')) {
+          itemType = item.funscript ? 'audio_haptic' : 'audio';
+        } else {
+          itemType = 'media'; // HLS, DASH, etc.
+        }
+      } else if (item.funscript) {
+        itemType = 'haptic'; // ✅ Pur haptique (avant audio silencieux)
+      } else if (item.duration) {
+        itemType = 'timeline';
+      }
+      
+      return {
+        ...item,
+        item_type: itemType
+      };
     });
   }
 
@@ -175,53 +207,44 @@ class PlaylistManager {
     });
   }
 
-  /**
-   * Enrichissement avec posters générés (ex-MediaManager)
-   */
-  enrichPlaylistWithPosters = async (playlist) => {
-    const enrichedPlaylist = [];
-    const posterCache = new Map();
-    
-    for (const [index, item] of playlist.entries()) {
-      const enrichedItem = { ...item };
-      
+  addFallbackPosters = (playlist) => {
+    return playlist.map((item, index) => {
       // Skip si poster déjà présent
-      if (item.poster) {
-        enrichedPlaylist.push(enrichedItem);
-        continue;
-      }
+      if (item.poster) return item;
       
-      // Générer poster pour les vidéos (si sources présentes)
-      if (item.sources && item.sources.length > 0) {
-        const videoSource = item.sources.find(src => {
-          const mimeType = src.type || this.detectMimeType(src.src);
-          return mimeType.startsWith('video/');
-        });
-        
-        if (videoSource) {
-          try {
-            // Vérifier le cache d'abord
-            if (posterCache.has(videoSource.src)) {
-              enrichedItem.poster = posterCache.get(videoSource.src);
-              enrichedItem._generatedPoster = true;
-            } else {
-              const posterDataURL = await this.generatePosterFromVideo(videoSource.src, 10);
-              enrichedItem.poster = posterDataURL;
-              enrichedItem._generatedPoster = true;
-              
-              // Mettre en cache
-              posterCache.set(videoSource.src, posterDataURL);
-            }
-          } catch (error) {
-            console.warn(`Failed to generate poster for item ${index + 1}:`, error.message);
-          }
-        }
-      }
+      // Générer fallback SVG basé sur le type détecté
+      return {
+        ...item,
+        poster: this.generateSVGPoster(item, index),
+        _generatedPoster: true
+      };
+    });
+  }
+
+  generateSVGPoster = (item, index) => {
+    let icon = '📄';
+    const bgColor = '#374151'; // ✅ Gris sombre neutre pour tous
+
+    if (item.sources && item.sources.length > 0) {
+      const firstSource = item.sources[0];
+      const srcLower = firstSource.src.toLowerCase();
+      const typeLower = (firstSource.type || '').toLowerCase();
       
-      enrichedPlaylist.push(enrichedItem);
+      if (typeLower.startsWith('audio/') || 
+          ['.mp3', '.wav', '.ogg', '.m4a', '.aac'].some(ext => srcLower.includes(ext))) {
+        icon = '🎵';
+      } else if (typeLower.startsWith('video/') || 
+                ['.mp4', '.webm', '.mov', '.avi', '.mkv'].some(ext => srcLower.includes(ext))) {
+        icon = '🎥';
+      }
+    } else if (item.funscript) {
+      icon = '🎮';
+    } else if (item.duration) {
+      icon = '⏱️';
     }
-    
-    return enrichedPlaylist;
+
+    const svg = `<svg width="48" height="32" xmlns="http://www.w3.org/2000/svg"><rect width="48" height="32" fill="${bgColor}" rx="4"/><text x="24" y="20" text-anchor="middle" fill="white" font-size="16" font-family="system-ui">${icon}</text></svg>`;
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
   }
 
   // ============================================================================
