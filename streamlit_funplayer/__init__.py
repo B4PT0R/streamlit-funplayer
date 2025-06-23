@@ -219,6 +219,28 @@ def create_playlist(*items, **playlist_options) -> List[Dict[str, Any]]:
 # CONVERSION FICHIERS - ✅ AMÉLIORÉ: Détection MIME + validation
 # ============================================================================
 
+def ext_to_mime(ext):
+    mime_types = {
+        # Video formats
+        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
+        '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.ogv': 'video/ogg',
+        '.m4v': 'video/mp4',
+        
+        # Audio formats  
+        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
+        '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
+        '.oga': 'audio/ogg',
+        
+        # Funscript/JSON
+        '.funscript': 'application/json', '.json': 'application/json',
+        
+        # Images (posters)
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+        '.gif': 'image/gif', '.webp': 'image/webp'
+    }
+    return mime_types.get(ext,'application/octet-stream')
+
+
 def file_to_data_url(
     file: Union[str, os.PathLike, BytesIO], 
     max_size_mb: int = 200
@@ -285,26 +307,7 @@ def file_to_data_url(
     
     # ✅ AMÉLIORÉ: Détection MIME plus complète
     file_extension = Path(filename).suffix.lower()
-    mime_types = {
-        # Video formats
-        '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime',
-        '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska', '.ogv': 'video/ogg',
-        '.m4v': 'video/mp4',
-        
-        # Audio formats  
-        '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg',
-        '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac',
-        '.oga': 'audio/ogg',
-        
-        # Funscript/JSON
-        '.funscript': 'application/json', '.json': 'application/json',
-        
-        # Images (posters)
-        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
-        '.gif': 'image/gif', '.webp': 'image/webp'
-    }
-    
-    mime_type = mime_types.get(file_extension, 'application/octet-stream')
+    mime_type = ext_to_mime(file_extension)
     
     # Encode to base64
     try:
@@ -400,45 +403,6 @@ def is_funscript_file(filename: str) -> bool:
     """Check if a file is a funscript."""
     extension = Path(filename).suffix.lower()
     return extension in {'.funscript', '.json'}
-
-def google_drive_direct_url(share_url):
-    """
-    Convertit une URL de partage Google Drive en URL de téléchargement direct
-    
-    Args:
-        share_url: URL de partage Google Drive
-        
-    Returns:
-        URL de téléchargement direct ou None si invalide
-        
-    Examples:
-        >>> url = "https://drive.google.com/file/d/1XYZ123/view?usp=sharing"
-        >>> google_drive_direct_url(url)
-        "https://drive.google.com/uc?export=download&id=1XYZ123"
-    """
-    if not share_url or not isinstance(share_url, str):
-        return None
-    
-    # Différents patterns d'URLs Google Drive
-    import re
-    
-    # Pattern principal: /file/d/FILE_ID/view
-    match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', share_url)
-    if match:
-        file_id = match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Pattern alternatif: ?id=FILE_ID
-    match = re.search(r'[?&]id=([a-zA-Z0-9_-]+)', share_url)
-    if match:
-        file_id = match.group(1)
-        return f"https://drive.google.com/uc?export=download&id={file_id}"
-    
-    # Si c'est déjà une URL directe, la retourner
-    if 'drive.google.com/uc?export=download' in share_url:
-        return share_url
-    
-    return None
 
 # ============================================================================
 # COMPOSANT PRINCIPAL - ✅ NOUVEAU: Format Video.js étendu uniquement

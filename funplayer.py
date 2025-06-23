@@ -16,12 +16,57 @@ try:
         file_to_data_url, 
         load_funscript,
         validate_playlist_item,
-        google_drive_direct_url,
+        ext_to_mime,
         __version__ as version
     )
 except ImportError:
     st.error("📦 streamlit-funplayer not found! Run: `pip install -e .`")
     st.stop()
+
+# ============================================================================
+# UTILS
+# ============================================================================
+
+def add_item_from_bucket(name=None,description=None,media_file=None,funscript_file=None):
+    """
+    Utility to fetch a media/funscript from the remote bucket containing the BlackTantra demo files
+    and add it as a new item to the current playlist.
+    """
+
+    if not (media_file or funscript_file):
+        return
+    
+    from pathlib import PurePosixPath
+
+    item={
+        'sources': [],
+        "_id": generate_item_id()
+    }
+
+    BASE = PurePosixPath("https://pub-3e61723b945d40e490d065f5b484484b.r2.dev")
+
+    if media_file:
+        path=PurePosixPath(media_file)
+        ext=path.suffix.lower()
+        if not name:
+            name=path.stem
+        media_url=BASE/path
+        mime_type=ext_to_mime(ext)
+        item.update(sources=[{'src': media_url.as_posix(), 'type': mime_type}])
+
+    if funscript_file:
+        path=PurePosixPath(funscript_file)
+        funscript_url=BASE/path
+        if not name:
+            name=path.stem
+        item.update(funscript=funscript_url.as_posix())
+
+    item.update(name=name)
+
+    if description:
+        item.update(description=description)
+
+    st.session_state.playlist.append(item)
 
 # ============================================================================
 # PAGE CONFIG - INCHANGÉ
@@ -57,11 +102,9 @@ if 'demo_loaded' not in st.session_state:
 
 from numpy import sin, pi, linspace
 
-actions=[dict(at=t*1000,pos=0.5+0.45*sin(2*pi*t*1000)) for t in linspace(0,120,1200)]
-
 DEMO_FUNSCRIPT = {
     "version": "1.0",
-    "actions": actions
+    "actions": [dict(at=t*1000,pos=0.5+0.45*sin(2*pi*t*1000)) for t in linspace(0,120,1200)]
 }
 
 EXAMPLE_PLAYLISTS = {
@@ -89,8 +132,6 @@ EXAMPLE_PLAYLISTS = {
         }
     ]
 }
-
-
 
 # ============================================================================
 # UTILITY FUNCTIONS - INCHANGÉ
@@ -140,7 +181,7 @@ def get_clean_playlist():
             for item in st.session_state.playlist]
 
 # ============================================================================
-# ✅ NOUVEAU : HEADER AVEC COMPOSANTS STREAMLIT NATIFS
+# HEADERS
 # ============================================================================
 
 # Header principal avec colonnes
@@ -157,14 +198,14 @@ st.markdown("*Powered by Video.js & Buttplug.io*")
 st.divider()
 
 # ============================================================================
-# SIDEBAR - PLAYLIST EDITOR REFACTORISÉ
+# SIDEBAR
 # ============================================================================
 
 with st.sidebar:
     st.header("📝 Playlist Editor")
     
     # ========================================================================
-    # DEMO EXAMPLES avec st.columns natif
+    # DEMO EXAMPLES
     # ========================================================================
     
     st.subheader("🚀 Quick Start")
@@ -190,20 +231,30 @@ with st.sidebar:
 
     st.divider()
 
-    st.subheader("I'm 18+ an willing to try with awesome NSFW content produced by [BlackTantra](https://blacktantra.net/)")
-    if st.button("Yes!", type="primary", use_container_width=True):
-        lily_video_url="https://github.com/B4PT0R/streamlit-funplayer/releases/download/v0.1-demos/Squeeze.Training.With.Lily.1.mp4"
-        lily_funscript_url="https://github.com/B4PT0R/streamlit-funplayer/releases/download/v0.1-demos/Squeeze.Training.With.Lily.1.funscript"
+    st.subheader("I'm 18+ and willing to try with awesome NSFW content produced by [BlackTantra](https://blacktantra.net/)")
+    if st.button("Yes!😈", type="primary", use_container_width=True):
 
-        item={
-            'sources': [{'src': lily_video_url, 'type': 'video/mp4'}],
-            'funscript': lily_funscript_url,
-            'name': 'Squeeze Training With Lily #1',
-            'description': 'Haptic-only playback (no media)',
-        }
-        item_copy = item.copy()
-        item_copy['_id'] = generate_item_id()
-        st.session_state.playlist.append(item_copy)
+        add_item_from_bucket(
+            name="Squeeze Training With Lily #1",
+            description="Squeeze it for Lily!",
+            media_file="squeeze_training_with_lily_1.mp4",
+            funscript_file="squeeze_training_with_lily_1.funscript",
+        )
+
+        add_item_from_bucket(
+            name="Squeeze Training With Lily #2",
+            description="Squeeze it harder!",
+            media_file="squeeze_training_with_lily_2.mp4",
+            funscript_file="squeeze_training_with_lily_2.funscript",
+        )
+
+        add_item_from_bucket(
+            name="Edge Training #3 Extended",
+            description="Will you resist?",
+            media_file="edge_training_3_extended.mp4",
+            funscript_file="edge_training_3_extended.funscript",
+        )
+
         st.session_state.demo_loaded = True
         st.rerun()
 
@@ -215,7 +266,7 @@ with st.sidebar:
     st.divider()
     
     # ========================================================================
-    # ✅ NOUVEAU : ADD NEW ITEM avec st.expander
+    # ADD NEW ITEM
     # ========================================================================
     
     with st.expander("➕ Add New Item", expanded=True):
@@ -311,7 +362,7 @@ with st.sidebar:
     st.divider()
     
     # ========================================================================
-    # ✅ NOUVEAU : CURRENT PLAYLIST avec st.container natifs
+    # CURRENT PLAYLIST
     # ========================================================================
     
     st.subheader(f"📋 Current Playlist ({len(st.session_state.playlist)})")
