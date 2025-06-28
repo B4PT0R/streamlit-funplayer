@@ -75,9 +75,9 @@ if (!rootElement) {
 const root = createRoot(rootElement)
 
 root.render(
-  <StrictMode>
+  //<StrictMode>
     <ErrorBoundary>
       <StreamlitFunPlayer />
     </ErrorBoundary>
-  </StrictMode>
+  //</StrictMode>
 )

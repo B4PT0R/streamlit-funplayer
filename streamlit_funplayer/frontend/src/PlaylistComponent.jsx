@@ -1,58 +1,52 @@
 import React, { Component } from 'react';
-import managers from './Managers'; // ✅ SEULE IMPORT du singleton
+import core from './FunPlayerCore';
 
 /**
- * PlaylistComponent - ✅ REFACTORISÉ: API Managers unifiée
- * Plus aucune référence locale aux managers, tout passe par le singleton
+ * PlaylistComponent - ✅ REFACTORISÉ selon guidelines
+ * 
+ * RESPONSABILITÉS SIMPLIFIÉES:
+ * - UI pure pour la playlist (uniquement si > 1 item)
+ * - Appels directs core.xxx (pas d'indirections)
+ * - Re-render sur événements choisis uniquement
+ * - ✅ PLUS DE: getters redondants, logique business dans event handlers
  */
 class PlaylistComponent extends Component {
   constructor(props) {
     super(props);
     
-    // ✅ SUPPRIMÉ: Plus de référence locale
-    // this.playlist = managers.getPlaylist(); // ❌
-    
     this.state = {
       renderTrigger: 0
     };
     
-    this.managersListener = null;
+    this.coreListener = null;
   }
 
-  componentDidMount() {    
-    // ✅ Utiliser le système d'événements Managers
-    this.managersListener = managers.addListener(this.handleManagerEvent);
-    this._triggerRenderIfNeeded();
+  componentDidMount() {
+    this.coreListener = core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
-    // ✅ Cleanup du listener managers
-    if (this.managersListener) {
-      this.managersListener();
-      this.managersListener = null;
+    if (this.coreListener) {
+      this.coreListener();
+      this.coreListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ GESTION D'ÉVÉNEMENTS VIA API MANAGERS UNIFIÉE
+  // ✅ GESTION D'ÉVÉNEMENTS SIMPLIFIÉE - Juste re-render
   // ============================================================================
 
-  handleManagerEvent = (event, data) => {
-    if (event === 'playlist:loaded' || event === 'playlist:itemChanged') {
-      this.handlePlaylistRefresh();
+  handleEvent = (event, data) => {
+    const eventsToReact = [
+      'playlist:loaded',
+      'playlist:itemChanged'
+    ];
+    
+    if (eventsToReact.includes(event)) {
+      this._triggerRender();
+      this.props.onResize?.();
     }
   }
-
-  handlePlaylistRefresh = () => {
-    this._triggerRenderIfNeeded();
-    if (this.props.onResize) {
-      this.props.onResize();
-    }
-  };
-
-  // ============================================================================
-  // ✅ HELPERS AVEC API MANAGERS UNIFIÉE
-  // ============================================================================
 
   _triggerRender = () => {
     this.setState(prevState => ({ 
@@ -60,39 +54,21 @@ class PlaylistComponent extends Component {
     }));
   }
 
-  _triggerRenderIfNeeded = () => {
-    // ✅ OPTIMISATION: Ne re-render que si on a vraiment du contenu à afficher
-    const playlist = this.getPlaylist();
-    if (playlist.length > 1) {
-      this._triggerRender();
-    }
-  }
-
-  // ✅ MODIFIÉ: Getters avec API Managers unifiée (pas de state redondant)
-  getPlaylist = () => managers.playlist.getItems();
-
-  getCurrentIndex = () => managers.playlist.getCurrentIndex();
-
-  shouldShowPlaylist = () => {
-    const playlist = this.getPlaylist();
-    return playlist.length > 1;
-  }
-
   // ============================================================================
-  // ✅ ACTIONS - API MANAGERS UNIFIÉE
+  // ✅ ACTIONS SIMPLIFIÉES - Appels directs core, pas d'indirections
   // ============================================================================
 
   handleItemClick = (index) => {
-    // ✅ MODIFIÉ: Accès direct au singleton
-    const success = managers.playlist.goTo(index);
-        
+    // ✅ BON: Appel direct core
+    const success = core.playlist.goTo(index);
+    
     if (!success) {
       console.error('PlaylistComponent: Failed to go to item', index);
     }
   }
 
   // ============================================================================
-  // ✅ MÉTADONNÉES - Utilise les getters
+  // ✅ HELPERS SIMPLIFIÉS - Accès direct core
   // ============================================================================
 
   getItemTitle = (item, index) => {
@@ -134,13 +110,23 @@ class PlaylistComponent extends Component {
   getItemInfo = (item) => {
     const info = [];
 
-    // Type detection...
+    // Type detection basée sur item_type (généré par PlaylistManager)
     switch (item.item_type) {
-      case 'video': info.push('VIDEO'); break;
-      case 'video_haptic': info.push('VIDEO'); break;
-      case 'audio': info.push('AUDIO'); break;
-      case 'audio_haptic': info.push('AUDIO'); break;
-      case 'haptic': info.push('HAPTIC'); break;
+      case 'video': 
+        info.push('VIDEO'); 
+        break;
+      case 'video_haptic': 
+        info.push('VIDEO'); 
+        break;
+      case 'audio': 
+        info.push('AUDIO'); 
+        break;
+      case 'audio_haptic': 
+        info.push('AUDIO'); 
+        break;
+      case 'haptic': 
+        info.push('HAPTIC'); 
+        break;
     }
 
     // ✅ Durée cosmétique (sera corrigée par MediaPlayer)
@@ -159,16 +145,16 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ RENDER AVEC API MANAGERS UNIFIÉE
+  // ✅ RENDER SIMPLIFIÉ - Accès direct aux données via core
   // ============================================================================
 
   render() {
-    // ✅ MODIFIÉ: Utilise les getters avec API Managers unifiée
-    const playlist = this.getPlaylist();
-    const currentIndex = this.getCurrentIndex();
+    // ✅ BON: Accès direct core pour toutes les données
+    const playlist = core.playlist.items;
+    const currentIndex = core.playlist.getCurrentIndex();
 
-    // ✅ OPTIMISATION: Toujours afficher si playlist > 1
-    if (!this.shouldShowPlaylist()) {
+    // ✅ OPTIMISATION: Ne s'afficher que si playlist > 1
+    if (playlist.length <= 1) {
       return null;
     }
 

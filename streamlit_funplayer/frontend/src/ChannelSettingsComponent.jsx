@@ -1,9 +1,14 @@
 import React, { Component } from 'react';
-import managers from './Managers'; // ✅ SEULE IMPORT du singleton
+import core from './FunPlayerCore';
 
 /**
- * ChannelSettingsComponent - ✅ REFACTORISÉ: API Managers unifiée
- * Plus aucune référence locale aux managers, tout passe par le singleton
+ * ChannelSettingsComponent - Configuration manuelle des champs d'actions
+ * 
+ * RESPONSABILITÉS:
+ * - UI minimaliste pour configurer timeField, valueField, directionField, durationField
+ * - Bouton discret "Configure Action Channels" en bas des settings
+ * - Dropdowns simples avec options détectées + "none"
+ * - Permet de convertir canaux polar → scalar via "none" sur directionField
  */
 class ChannelSettingsComponent extends Component {
   constructor(props) {
@@ -11,261 +16,269 @@ class ChannelSettingsComponent extends Component {
     
     this.state = {
       isExpanded: false,
-      renderTrigger: 0
+      renderTrigger: 0,
+      pendingConfig: {} // Config en cours avant validation
     };
     
-    this.managersListener = null;
+    this.coreListener = null;
   }
 
   componentDidMount() {
-    // ✅ Écouter les événements pour re-render
-    this.managersListener = managers.addListener(this.handleManagerEvent);
+    this.coreListener = core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
-    if (this.managersListener) {
-      this.managersListener();
-      this.managersListener = null;
+    if (this.coreListener) {
+      this.coreListener();
+      this.coreListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ GESTION D'ÉVÉNEMENTS AVEC API MANAGERS UNIFIÉE
+  // GESTION D'ÉVÉNEMENTS
   // ============================================================================
 
-  handleManagerEvent = (event, data) => {
-    // ✅ Re-render sur événements qui impactent ce canal
+  handleEvent = (event, data) => {
     const eventsToReact = [
-      'funscript:options',     // Options de canal modifiées
-      'buttplug:device',       // Device changé (actuators changent)
-      'buttplug:connection'    // Connexion changée (capabilities changent)
+      'funscript:load',     // Nouveau funscript → reset config
+      'funscript:reset'     // Reset → masquer
     ];
     
-    if (eventsToReact.some(e => event.startsWith(e.split(':')[0]))) {
-      // ✅ Filtrer: seulement si cet événement concerne notre canal
-      if (event === 'funscript:options' && data.channel !== this.props.channel) {
-        return; // Pas notre canal, ignorer
+    if (eventsToReact.includes(event)) {
+      if (event === 'funscript:load') {
+        this.setState({ pendingConfig: {}});
       }
-      
-      // ✅ Trigger re-render via setState
-      this.setState(prevState => ({ 
-        renderTrigger: prevState.renderTrigger + 1 
-      }));
+      if (event === 'funscript:reset') {
+        this.setState({ isExpanded: false });
+      }
+      this._triggerRender();
     }
   }
 
-  // ============================================================================
-  // ✅ ACTIONS - API MANAGERS UNIFIÉE
-  // ============================================================================
-
-  updateChannelOption = (key, value) => {
-    const { channel } = this.props;
-    
-    // ✅ MODIFIÉ: Accès direct au singleton
-    if (!managers.funscript) return;
-    
-    managers.funscript.setOptions(channel, { [key]: value });
-    // ✅ L'événement 'funscript:options' sera déclenché automatiquement
-    // ✅ Le re-render se fera via handleManagerEvent
-    
-    // ✅ CONSERVÉ: Notifier le parent pour les logs/status
-    this.props.onSettingsChange?.(channel, key, value);
-  }
-
-  resetChannel = () => {
-    const { channel } = this.props;
-    
-    // ✅ MODIFIÉ: Accès direct au singleton
-    if (!managers.funscript) return;
-    
-    managers.funscript.resetOptions(channel);
-    // ✅ L'événement 'funscript:options' sera déclenché automatiquement
-    
-    // ✅ CONSERVÉ: Notifier le parent
-    this.props.onSettingsChange?.(channel, 'reset', null);
+  _triggerRender = () => {
+    this.setState(prevState => ({ 
+      renderTrigger: prevState.renderTrigger + 1 
+    }));
   }
 
   // ============================================================================
-  // ✅ GETTERS AVEC API MANAGERS UNIFIÉE
-  // ============================================================================
-
-  getChannelOptions = () => {
-    const { channel } = this.props;
-    
-    // ✅ MODIFIÉ: Accès direct au singleton
-    return managers.funscript?.getOptions(channel) || {};
-  }
-
-  getActuatorOptions = () => {
-    const { capabilities } = this.props;
-    
-    if (capabilities && capabilities.actuators.length > 0) {
-      // Device connecté - actuateurs réels
-      return capabilities.actuators.map((caps, index) => {
-        const types = [];
-        if (caps.vibrate) types.push('vibrate');
-        if (caps.oscillate) types.push('oscillate');
-        if (caps.linear) types.push('linear');
-        if (caps.rotate) types.push('rotate');
-        
-        return {
-          index,
-          label: `#${index} (${types.join(', ')})`,
-          value: index
-        };
-      });
-    } else {
-      // Pas de device - actuateurs virtuels
-      return [
-        { index: 0, label: '#0 (linear)', value: 0 },
-        { index: 1, label: '#1 (vibrate)', value: 1 },
-        { index: 2, label: '#2 (rotate)', value: 2 },
-        { index: 3, label: '#3 (oscillate)', value: 3 }
-      ];
-    }
-  }
-
-  // ============================================================================
-  // RENDER METHODS - ✅ Utilise les getters avec API Managers unifiée
+  // ACTIONS
   // ============================================================================
 
   handleToggleExpanded = () => {
-    this.setState(prevState => ({
-      isExpanded: !prevState.isExpanded,
-      renderTrigger: prevState.renderTrigger  // Pas besoin d'incrémenter ici
-    }), () => {
+    this.setState({ isExpanded: !this.state.isExpanded }, () => {
       this.props.onResize?.();
     });
   }
 
-  renderCompactLine() {
-    const { channel } = this.props;
-    const options = this.getChannelOptions();
-    const actuatorOptions = this.getActuatorOptions();
-    const { isExpanded } = this.state;
+  handleFieldChange = (channelName, fieldType, value) => {
+    this.setState(prevState => ({
+      pendingConfig: {
+        ...prevState.pendingConfig,
+        [channelName]: {
+          ...prevState.pendingConfig[channelName],
+          [fieldType]: value === 'none' ? null : value
+        }
+      }
+    }));
+  }
+
+  handleValidate = () => {  // Enlever async
+    try {
+      const originalData = core.funscript.data;
+      if (originalData) {
+        core.funscript.loadWithCustomFieldConfig(originalData, pendingConfig); // Enlever await
+        this.setState({ pendingConfig: {}, isExpanded: false });
+      }
+    } catch (error) {
+      console.error('Failed to apply channel configuration:', error);
+    }
+  }
+
+  // ============================================================================
+  // HELPERS
+  // ============================================================================
+
+  getCurrentConfig = (channelName, fieldType) => {
+    const { pendingConfig } = this.state;
+    const channel = core.funscript.getChannel(channelName);
     
+    // Valeur en cours d'édition ou valeur actuelle du canal
+    if (pendingConfig[channelName] && pendingConfig[channelName][fieldType] !== undefined) {
+      return pendingConfig[channelName][fieldType] || 'none';
+    }
+    
+    if (channel && channel.fieldConfig) {
+      return channel.fieldConfig[fieldType] || 'none';
+    }
+    
+    // Defaults par type
+    const defaults = {
+      timeField: 'at',
+      valueField: 'pos',
+      directionField: 'none',
+      durationField: 'none'
+    };
+    
+    return defaults[fieldType] || 'none';
+  }
+
+  getAvailableFields = (detectedFields, fieldType) => {
+    const fieldMap = {
+      timeField: 'availableTimeFields',
+      valueField: 'availableValueFields', 
+      directionField: 'availableDirectionFields',
+      durationField: 'availableDurationFields'
+    };
+    
+    const availableKey = fieldMap[fieldType];
+    return detectedFields[availableKey] || [];
+  }
+
+  hasPendingChanges = () => {
+    return Object.keys(this.state.pendingConfig).length > 0;
+  }
+
+  // ============================================================================
+  // RENDER
+  // ============================================================================
+
+  renderChannelConfig = (channelName, detectedFields) => {
+    const fieldTypes = [
+      { key: 'timeField', label: 'Time' },
+      { key: 'valueField', label: 'Value' },
+      { key: 'directionField', label: 'Direction' },
+      { key: 'durationField', label: 'Duration' }
+    ];
+
     return (
-      <div className="fp-compact-line">
+      <div key={channelName} className="fp-layout-column">
         
-        {/* Channel name */}
-        <span className="fp-badge fp-no-shrink">
-          {channel}
-        </span>
+        {/* Header du canal */}
+        <div className="fp-layout-row">
+          <span className="fp-badge fp-no-shrink">{channelName}</span>
+        </div>
         
-        {/* Enable toggle */}
-        <label className="fp-toggle">
-          <input
-            className="fp-checkbox"
-            type="checkbox"
-            checked={options.enabled || false}
-            onChange={(e) => this.updateChannelOption('enabled', e.target.checked)}
-          />
-        </label>
-        
-        {/* Actuator selector */}
-        <select
-          className="fp-input fp-select fp-flex"
-          value={options.actuatorIndex ?? ''}
-          onChange={(e) => {
-            const value = e.target.value === '' ? null : parseInt(e.target.value);
-            this.updateChannelOption('actuatorIndex', value);
-          }}
-          disabled={!options.enabled}
-        >
-          <option value="">None</option>
-          {actuatorOptions.map((opt) => (
-            <option key={opt.index} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        
-        {/* Expand toggle */}
-        <button 
-          className="fp-btn fp-btn-ghost fp-chevron"
-          onClick={this.handleToggleExpanded}
-        >
-          {isExpanded ? '▲' : '▼'}
-        </button>
+        {/* Config des 4 champs */}
+        <div className="fp-layout-column fp-layout-compact">
+          {fieldTypes.map(({ key, label }) => {
+            const availableFields = this.getAvailableFields(detectedFields, key);
+            const currentValue = this.getCurrentConfig(channelName, key);
+            
+            return (
+              <div key={key} className="fp-layout-row">
+                <label className="fp-label fp-no-shrink" style={{ minWidth: '60px' }}>
+                  {label}:
+                </label>
+                <select
+                  className="fp-input fp-select fp-flex"
+                  value={currentValue}
+                  onChange={(e) => this.handleFieldChange(channelName, key, e.target.value)}
+                >
+                  <option value="none">none</option>
+                  {availableFields.map(field => (
+                    <option key={field} value={field}>{field}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })}
+        </div>
         
       </div>
     );
   }
 
-  renderExpandedSettings() {
+  renderExpandedSettings = () => {
     if (!this.state.isExpanded) return null;
     
-    const options = this.getChannelOptions();
+    const detectedFields = core.funscript.getDetectedFields();
+    const channelNames = Object.keys(detectedFields);
+    
+    if (channelNames.length === 0) {
+      return (
+        <div className="fp-expanded">
+          <div style={{ 
+            textAlign: 'center', 
+            color: 'var(--text-color)', 
+            opacity: 0.6,
+            padding: 'var(--spacing)' 
+          }}>
+            No channels detected. Load a funscript first.
+          </div>
+        </div>
+      );
+    }
 
     return (
-      <div className="fp-expanded fp-layout-column fp-layout-compact">
-        
-        {/* Scale */}
+      <div className="fp-expanded">
         <div className="fp-layout-column">
-          <label className="fp-label">
-            Scale: {((options.scale || 1) * 100).toFixed(0)}%
-          </label>
-          <input
-            className="fp-input fp-range"
-            type="range"
-            min="0"
-            max="2"
-            step="0.01"
-            value={options.scale || 1}
-            onChange={(e) => this.updateChannelOption('scale', parseFloat(e.target.value))}
-            disabled={!options.enabled}
-          />
+          
+          {/* Config par canal */}
+          {channelNames.map(channelName => 
+            this.renderChannelConfig(channelName, detectedFields[channelName])
+          )}
+          
+          {/* Bouton valider */}
+          <div className="fp-layout-row" style={{ marginTop: 'var(--spacing)' }}>
+            <button 
+              className="fp-btn fp-btn-primary"
+              onClick={this.handleValidate}
+              disabled={!this.hasPendingChanges()}
+            >
+              ✓ Validate Changes
+            </button>
+            
+            {this.hasPendingChanges() && (
+              <button 
+                className="fp-btn fp-btn-ghost"
+                onClick={() => this.setState({ pendingConfig: {} })}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          
         </div>
-
-        {/* Time Offset */}
-        <div className="fp-layout-column">
-          <label className="fp-label">
-            Time Offset: {((options.timeOffset || 0) * 1000).toFixed(0)}ms
-          </label>
-          <input
-            className="fp-input fp-range"
-            type="range"
-            min="-0.5"
-            max="0.5"
-            step="0.001"
-            value={options.timeOffset || 0}
-            onChange={(e) => this.updateChannelOption('timeOffset', parseFloat(e.target.value))}
-            disabled={!options.enabled}
-          />
-        </div>
-
-        {/* Invert */}
-        <label className="fp-toggle">
-          <input
-            className="fp-checkbox"
-            type="checkbox"
-            checked={options.invert || false}
-            onChange={(e) => this.updateChannelOption('invert', e.target.checked)}
-            disabled={!options.enabled}
-          />
-          <span className="fp-label">Invert Values</span>
-        </label>
-
-        {/* Reset */}
-        <button 
-          className="fp-btn fp-btn-compact"
-          onClick={this.resetChannel}
-        >
-          🔄 Reset Channel
-        </button>
-        
       </div>
     );
   }
 
   render() {
-    return (
-      <div className="fp-expandable">
-        {this.renderCompactLine()}
-        {this.renderExpandedSettings()}
-      </div>
-    );
-  }
+      const { isExpanded } = this.state;
+      
+      // Ne s'afficher que si funscript chargé
+      if (!core.funscript.hasFunscript()) {
+        return null;
+      }
+      
+      const detectedFields = core.funscript.getDetectedFields();
+      const channelCount = Object.keys(detectedFields).length;
+      
+      return (
+        <div className="channel-settings">
+          
+          {/* Bouton discret */}
+          <div className="fp-expandable">
+            {/* ✅ MODIFIÉ: Ajout de fp-justify-between pour pousser le chevron à droite */}
+            <div className="fp-compact-line fp-justify-between">
+              <span className="fp-label">Configure Action Channels ({channelCount})</span>
+              
+              <button
+                className="fp-btn fp-btn-ghost fp-chevron"
+                onClick={this.handleToggleExpanded}
+              >
+                {isExpanded ? '▲' : '▼'}
+              </button>
+            </div>
+            
+            {/* Zone expandue */}
+            {this.renderExpandedSettings()}
+          </div>
+          
+        </div>
+      );
+    }
 }
 
 export default ChannelSettingsComponent;

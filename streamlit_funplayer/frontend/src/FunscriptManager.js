@@ -1,456 +1,228 @@
+import { Channel } from './Channel';
+import { HapticType } from './constants';
+
+/**
+ * FunscriptManager - ✅ SIMPLIFIÉ: Heuristique déplacée dans Channel
+ * 
+ * RESPONSABILITÉS SIMPLIFIÉES:
+ * - Parsing funscript et extraction des champs 
+ * - Configuration fieldConfig basique (sans heuristique complexe)
+ * - Création des instances Channel (qui font leur propre heuristique)
+ * - AutoMap optimisé utilisant channel.likelyCapability
+ * - Support config utilisateur custom pour override manuel
+ */
 class FunscriptManager {
-  constructor() {
+  constructor(notify) {
+    this.notify = notify;
+    
+    // Données funscript
     this.data = null;
-    this.channels = new Map(); // channel -> sorted actions [{time, value}]
+    this.channels = []; // Array<Channel> - source de vérité unique
     this.duration = 0;
-    this.options = new Map(); // channel -> options
-
-    this.globalScale = 1.0;
-    this.globalOffset = 0.0;
     
-    // ✅ NOUVEAU: Cache d'interpolation par canal
-    this.interpolationCache = new Map(); // channel -> { leftIndex, rightIndex, lastTime }
-    this.seekThreshold = 100; // ms - seuil pour détecter un seek vs progression normale
-    
-    // Default channel options
-    this.defaults = {
-      enabled: true,
-      scale: 1.0,
-      timeOffset: 0.0,
-      invert: false,
-      actuatorIndex: null
-    };
-
-    // ✅ NOUVEAU: Système d'événements
-    this.onLoad = null;           // (data) => {} - Quand un funscript est chargé
-    this.onReset = null;          // () => {} - Quand le manager est remis à zéro
-    this.onChannelsChanged = null; // (channels) => {} - Quand les canaux changent
-    this.onOptionsChanged = null; // (channel, options) => {} - Quand des options changent
-    this.onGlobalOffsetChanged = null; // (offset) => {} - Quand l'offset global change
-    this.onGlobalScaleChanged = null;
+    // Support config utilisateur custom
+    this.customFieldConfig = null;
   }
 
   // ============================================================================
-  // MÉTHODES EXISTANTES (inchangées)
+  // SECTION 1: LOADING & RESET
   // ============================================================================
 
+  /**
+   * Charge un funscript depuis URL ou objet
+   */
+  async loadFromSource(src) {
+    try {
+      this.notify?.('status:funscript', { message: 'Loading funscript from source...', type: 'processing' });
+
+      let data;
+      if (typeof src === 'string') {
+        if (src.startsWith('http') || src.startsWith('/')) {
+          data = await this._fetchWithCorsProxy(src);
+        } else {
+          data = JSON.parse(src);
+        }
+      } else {
+        data = src;
+      }
+      
+      return this.load(data);
+      
+    } catch (error) {
+      this.notify?.('status:funscript', { message: 'Failed to load funscript from source', type: 'error', error: error.message });
+      throw error;
+    }
+  }
+
+  /**
+   * Charge un funscript et extrait tous les canaux en instances Channel
+   */
   load(funscriptData) {
     try {
+      this.notify?.('status:funscript', { message: 'Processing funscript data...', type: 'processing' });
+
       this.data = typeof funscriptData === 'string' ? JSON.parse(funscriptData) : funscriptData;
       this._extractChannels();
       this._calculateDuration();
-      this._initOptions();
-      this._initInterpolationCache();
       
-      console.log(`Loaded: ${this.getChannels().length} channels, ${this.duration.toFixed(2)}s`);
+      this.notify?.('status:funscript', { message: `Loaded ${this.channels.length} channels, ${this.duration.toFixed(2)}s`, type: 'success' });
+      this.notify?.('status:funscript', { message: `Channel extraction complete: ${this.channels.map(ch => ch.name).join(', ')}`, type: 'log' });
       
-      // ✅ NOUVEAU: Déclencher événement de chargement
-      this._notifyLoad(this.data);
-      this._notifyChannelsChanged(this.getChannels());
+      this.notify?.('funscript:load', { 
+        data: this.data, 
+        channels: this.channels.map(ch => ch.name),
+        channelInstances: this.channels,
+        duration: this.duration
+      });
+      
+      this.notify?.('funscript:channels', { 
+        channels: this.channels.map(ch => ch.name),
+        channelInstances: this.channels,
+        total: this.channels.length 
+      });
       
       return true;
     } catch (error) {
-      console.error('Load failed:', error);
+      this.notify?.('status:funscript', { message: 'Failed to process funscript', type: 'error', error: error.message });
       this._reset();
       return false;
     }
   }
 
+  /**
+   * Charge un funscript avec config utilisateur custom
+   */
+  loadWithCustomFieldConfig(funscriptData, customFieldConfig = null) {
+    this.customFieldConfig = customFieldConfig;
+    return this.load(funscriptData);
+  }
+
+  /**
+   * Charge le funscript d'un item de playlist
+   */
+  async loadFromPlaylistItem(item) {
+    if (!item) {
+      this.reset();
+      return true;
+    }
+
+    try {
+      this.notify?.('status:funscript', { message: `Loading funscript for item: ${item.name || 'Untitled'}`, type: 'processing' });
+
+      if (item.funscript) {
+        if (typeof item.funscript === 'object') {
+          this.load(item.funscript);
+        } else {
+          await this.loadFromSource(item.funscript);
+        }
+        this.notify?.('status:funscript', { message: `Funscript loaded for: ${item.name || 'Untitled'}`, type: 'success' });
+      } else {
+        this.reset();
+        this.notify?.('status:funscript', { message: 'No funscript for current item', type: 'info' });
+      }
+
+      return true;
+
+    } catch (error) {
+      this.notify?.('status:funscript', { message: `Failed to load funscript from playlist item: ${error.message}`, type: 'error' });
+      this.reset();
+      return false;
+    }
+  }
+
+  /**
+   * Fetch avec proxy CORS si besoin
+   */
+  async _fetchWithCorsProxy(url) {
+    const directError = null;
+    const proxyError = null;
+    
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      try {
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return await response.json();
+      } catch (proxyErr) {
+        throw new Error(`Failed to fetch funscript. Direct: ${directError?.message || error.message}, Proxy: ${proxyErr.message}`);
+      }
+    }
+  }
+
+  /**
+   * Vérifie si des canaux sont chargés
+   */
+  hasFunscript() {
+    return this.channels.length > 0;
+  }
+
+  /**
+   * Reset complet du manager
+   */
   reset() {
     this._reset();
-    this._notifyReset();
+    this.notify?.('status:funscript', { message: 'Funscript manager reset', type: 'info' });
+    this.notify?.('funscript:reset', {});
   }
+
+  /**
+   * Reset interne
+   */
+  _reset() {
+    // Débrancher tous les canaux avant reset
+    this.channels.forEach(channel => channel.unplugAll());
+    
+    this.data = null;
+    this.channels = [];
+    this.duration = 0;
+    this.customFieldConfig = null;
+  }
+
+  // ============================================================================
+  // SECTION 2: GETTERS & BASIC INFO
+  // ============================================================================
 
   getChannels() {
-    return Array.from(this.channels.keys());
+    return [...this.channels];
   }
 
-  hasChannel(channel) {
-    return this.channels.has(channel);
+  getChannelNames() {
+    return this.channels.map(channel => channel.name);
   }
 
-  getActionCount(channel) {
-    return this.channels.get(channel)?.length || 0;
+  getChannel(channelName) {
+    return this.channels.find(channel => channel.name === channelName) || null;
+  }
+
+  hasChannel(channelName) {
+    return this.getChannel(channelName) !== null;
+  }
+
+  getChannelsByType(hapticType) {
+    return this.channels.filter(channel => channel.type === hapticType);
   }
 
   getDuration() {
     return this.duration;
   }
 
-  setGlobalScale(scale) {
-    const newScale = typeof scale === 'number' ? Math.max(0, Math.min(5.0, scale)) : 1.0;
-    
-    // ✅ NOUVEAU: Déclencher événement seulement si changement
-    if (this.globalScale !== newScale) {
-      this.globalScale = newScale;
-      this._notifyGlobalScaleChanged(newScale);
-    }
-  }
+  // ============================================================================
+  // SECTION 3: INTERPOLATION PURE
+  // ============================================================================
 
-  getGlobalScale() {
-    return this.globalScale;
-  }
-
-  setGlobalOffset(offset) {
-    const newOffset = typeof offset === 'number' ? offset : 0.0;
-    
-    // ✅ NOUVEAU: Déclencher événement seulement si changement
-    if (this.globalOffset !== newOffset) {
-      this.globalOffset = newOffset;
-      this._clearInterpolationCache();
-      this._notifyGlobalOffsetChanged(newOffset);
-    }
-  }
-
-  getGlobalOffset() {
-    return this.globalOffset;
-  }
-
-  // Options management (inchangé)
-  setOptions(channel, opts) {
-    if (!this.hasChannel(channel)) return false;
-    
-    const current = this.options.get(channel) || { ...this.defaults };
-    const updated = { ...current, ...opts };
-    
-    if (!this._validateOptions(updated)) return false;
-    
-    this.options.set(channel, updated);
-    
-    // ✅ NOUVEAU: Vider le cache si timeOffset change
-    if (opts.timeOffset !== undefined) {
-      this._clearChannelCache(channel);
-    }
-    
-    // ✅ NOUVEAU: Déclencher événement de changement d'options
-    this._notifyOptionsChanged(channel, updated);
-    
-    return true;
-  }
-
-  getOptions(channel) {
-    if (!this.hasChannel(channel)) return null;
-    return this.options.get(channel) || { ...this.defaults };
-  }
-
-  getAllOptions() {
+  interpolateAll(channelTimings) {
     const result = {};
-    for (const channel of this.getChannels()) {
-      result[channel] = this.getOptions(channel);
-    }
-    return result;
-  }
-
-  resetOptions(channel = null) {
-    if (channel === null) {
-      // Reset all
-      for (const ch of this.getChannels()) {
-        this.options.set(ch, { ...this.defaults });
-      }
-      this._clearInterpolationCache();
-      
-      // ✅ NOUVEAU: Notifier pour tous les canaux
-      for (const ch of this.getChannels()) {
-        this._notifyOptionsChanged(ch, { ...this.defaults });
-      }
-    } else if (this.hasChannel(channel)) {
-      this.options.set(channel, { ...this.defaults });
-      this._clearChannelCache(channel);
-      
-      // ✅ NOUVEAU: Notifier pour le canal spécifique
-      this._notifyOptionsChanged(channel, { ...this.defaults });
-    }
-  }
-
-  // ============================================================================
-  // ✅ NOUVELLES MÉTHODES DE NOTIFICATION PRIVÉES
-  // ============================================================================
-
-  _notifyLoad(data) {
-    if (this.onLoad && typeof this.onLoad === 'function') {
-      try {
-        this.onLoad(data);
-      } catch (error) {
-        console.error('FunscriptManager: onLoad callback error:', error);
-      }
-    }
-  }
-
-  _notifyReset() {
-    if (this.onReset && typeof this.onReset === 'function') {
-      try {
-        this.onReset();
-      } catch (error) {
-        console.error('FunscriptManager: onReset callback error:', error);
-      }
-    }
-  }
-
-  _notifyChannelsChanged(channels) {
-    if (this.onChannelsChanged && typeof this.onChannelsChanged === 'function') {
-      try {
-        this.onChannelsChanged([...channels]); // Copie pour éviter mutation
-      } catch (error) {
-        console.error('FunscriptManager: onChannelsChanged callback error:', error);
-      }
-    }
-  }
-
-  _notifyOptionsChanged(channel, options) {
-    if (this.onOptionsChanged && typeof this.onOptionsChanged === 'function') {
-      try {
-        this.onOptionsChanged(channel, { ...options }); // Copie pour éviter mutation
-      } catch (error) {
-        console.error('FunscriptManager: onOptionsChanged callback error:', error);
-      }
-    }
-  }
-
-  _notifyGlobalScaleChanged(scale) {
-    if (this.onGlobalScaleChanged && typeof this.onGlobalScaleChanged === 'function') {
-      try {
-        this.onGlobalScaleChanged(scale);
-      } catch (error) {
-        console.error('FunscriptManager: onGlobalScaleChanged callback error:', error);
-      }
-    }
-  }
-
-  _notifyGlobalOffsetChanged(offset) {
-    if (this.onGlobalOffsetChanged && typeof this.onGlobalOffsetChanged === 'function') {
-      try {
-        this.onGlobalOffsetChanged(offset);
-      } catch (error) {
-        console.error('FunscriptManager: onGlobalOffsetChanged callback error:', error);
-      }
-    }
-  }
-
-  // ============================================================================
-  // ✅ NOUVELLE INTERPOLATION OPTIMISÉE
-  // ============================================================================
-
-  interpolateAt(t, channel = 'pos') {
-    const actions = this.channels.get(channel);
-    if (!actions?.length) return null;
-
-    const opts = this.getOptions(channel);
-    if (!opts.enabled) return null;
-
-    // Appliquer global offset + individual offset
-    const totalOffset = this.globalOffset + (opts.timeOffset || 0);
-    const adjustedTime = (t + totalOffset) * 1000; // Convert to ms
     
-    const rawValue = this._interpolateRawOptimized(adjustedTime, actions, channel);
-    
-    return rawValue !== null ? this._processValue(rawValue, opts) : null;
-  }
-
-  interpolateAll(t) {
-    const result = {};
-    for (const channel of this.channels.keys()) {
-      const value = this.interpolateAt(t, channel);
-      if (value !== null) {
-        result[channel] = value;
-      }
-    }
-    return result;
-  }
-
-  interpolateToActuators(t) {
-    const result = {};
-    for (const channel of this.channels.keys()) {
-      const value = this.interpolateAt(t, channel);
-      if (value !== null) {
-        const actuator = this.getOptions(channel).actuatorIndex;
-        if (actuator !== null) {
-          result[actuator] = value;
-        }
-      }
-    }
-    return result;
-  }
-
-  // ============================================================================
-  // ✅ NOUVELLE MÉTHODE D'INTERPOLATION AVEC CACHE
-  // ============================================================================
-
-  _interpolateRawOptimized(timeMs, actions, channel) {
-    const clampedTime = Math.max(0, Math.min(this.duration * 1000, timeMs));
-    
-    if (actions.length === 1) return actions[0].value;
-    
-    // Récupérer ou initialiser le cache pour ce canal
-    let cache = this.interpolationCache.get(channel);
-    if (!cache) {
-      cache = { leftIndex: 0, rightIndex: 1, lastTime: -1 };
-      this.interpolationCache.set(channel, cache);
-    }
-
-    // Détecter un seek (saut temporel important)
-    const isSeek = cache.lastTime >= 0 && Math.abs(clampedTime - cache.lastTime) > this.seekThreshold;
-    
-    if (isSeek) {
-      // En cas de seek, réinitialiser avec recherche binaire mais en gardant les bornes si elles sont déjà bonnes
-      const { leftIndex, rightIndex } = this._findBoundsAfterSeek(clampedTime, actions, cache);
-      cache.leftIndex = leftIndex;
-      cache.rightIndex = rightIndex;
-    } else {
-      // Progression normale : glisser les bornes si nécessaire
-      this._slideBounds(clampedTime, actions, cache);
-    }
-
-    cache.lastTime = clampedTime;
-
-    // Vérification de sécurité
-    if (cache.leftIndex < 0 || cache.rightIndex >= actions.length) {
-      console.warn(`Invalid cache bounds for channel ${channel}:`, cache);
-      return this._fallbackInterpolation(clampedTime, actions);
-    }
-
-    const leftAction = actions[cache.leftIndex];
-    const rightAction = actions[cache.rightIndex];
-
-    // Cas exacts
-    if (leftAction.time === clampedTime) return leftAction.value;
-    if (rightAction.time === clampedTime) return rightAction.value;
-
-    // Interpolation linéaire
-    if (clampedTime <= leftAction.time) return leftAction.value;
-    if (clampedTime >= rightAction.time) return rightAction.value;
-
-    const progress = (clampedTime - leftAction.time) / (rightAction.time - leftAction.time);
-    return leftAction.value + (rightAction.value - leftAction.value) * progress;
-  }
-
-  // ✅ NOUVEAU: Glissement progressif des bornes
-  _slideBounds(timeMs, actions, cache) {
-    // Avancer rightIndex si le temps dépasse l'action droite
-    while (cache.rightIndex < actions.length - 1 && timeMs > actions[cache.rightIndex].time) {
-      cache.leftIndex = cache.rightIndex;
-      cache.rightIndex++;
-    }
-
-    // Reculer leftIndex si le temps est avant l'action gauche
-    while (cache.leftIndex > 0 && timeMs < actions[cache.leftIndex].time) {
-      cache.rightIndex = cache.leftIndex;
-      cache.leftIndex--;
-    }
-
-    // S'assurer que leftIndex < rightIndex
-    if (cache.leftIndex >= cache.rightIndex) {
-      if (cache.leftIndex > 0) {
-        cache.rightIndex = cache.leftIndex;
-        cache.leftIndex--;
-      } else if (cache.rightIndex < actions.length - 1) {
-        cache.leftIndex = cache.rightIndex;
-        cache.rightIndex++;
-      }
-    }
-  }
-
-  // ✅ NOUVEAU: Recherche optimisée après seek
-  _findBoundsAfterSeek(timeMs, actions, cache) {
-    // Vérifier d'abord si les bornes actuelles sont déjà bonnes
-    const leftTime = actions[cache.leftIndex]?.time || -1;
-    const rightTime = actions[cache.rightIndex]?.time || Infinity;
-
-    if (timeMs >= leftTime && timeMs <= rightTime) {
-      // Les bornes sont déjà correctes, pas besoin de chercher
-      return { leftIndex: cache.leftIndex, rightIndex: cache.rightIndex };
-    }
-
-    // Recherche binaire classique si les bornes ne conviennent pas
-    let left = 0, right = actions.length - 1;
-    
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const midTime = actions[mid].time;
-      
-      if (midTime === timeMs) {
-        return { leftIndex: mid, rightIndex: Math.min(mid + 1, actions.length - 1) };
-      }
-      if (midTime < timeMs) left = mid + 1;
-      else right = mid - 1;
-    }
-    
-    // Retourner les bornes encadrantes
-    const leftIndex = Math.max(0, right);
-    const rightIndex = Math.min(left, actions.length - 1);
-    
-    return { leftIndex, rightIndex };
-  }
-
-  // ✅ NOUVEAU: Fallback en cas de problème de cache
-  _fallbackInterpolation(timeMs, actions) {
-    console.warn('Using fallback interpolation');
-    
-    // Recherche binaire classique (code original)
-    let left = 0, right = actions.length - 1;
-    
-    while (left <= right) {
-      const mid = Math.floor((left + right) / 2);
-      const midTime = actions[mid].time;
-      
-      if (midTime === timeMs) return actions[mid].value;
-      if (midTime < timeMs) left = mid + 1;
-      else right = mid - 1;
-    }
-    
-    // Handle bounds
-    if (right < 0) return actions[0].value;
-    if (left >= actions.length) return actions[actions.length - 1].value;
-    
-    // Linear interpolation
-    const before = actions[right];
-    const after = actions[left];
-    const progress = (timeMs - before.time) / (after.time - before.time);
-    
-    return before.value + (after.value - before.value) * progress;
-  }
-
-  // ============================================================================
-  // ✅ NOUVELLES MÉTHODES DE GESTION DU CACHE
-  // ============================================================================
-
-  _initInterpolationCache() {
-    this.interpolationCache.clear();
-    // Le cache sera initialisé lazy lors du premier appel d'interpolation
-  }
-
-  _clearInterpolationCache() {
-    this.interpolationCache.clear();
-  }
-
-  _clearChannelCache(channel) {
-    this.interpolationCache.delete(channel);
-  }
-
-  // Méthode publique pour forcer la réinitialisation du cache (utile après un seek manuel)
-  resetInterpolationCache(channel = null) {
-    if (channel === null) {
-      this._clearInterpolationCache();
-    } else {
-      this._clearChannelCache(channel);
-    }
-  }
-
-  // ============================================================================
-  // NOUVELLES MÉTHODES : AUTO-MAPPING DES CANAUX VERS LES ACTUATEURS PERTINENTS
-  // ============================================================================
-
-  /**
-   * Auto-map avec notification d'événement
-   */
-  autoMapChannels(capabilities = null) {
-    const result = this._performAutoMapping(capabilities);
-    
-    // ✅ NOUVEAU: Notifier les changements d'options pour tous les canaux mappés
-    if (result.mapped > 0) {
-      for (const channel of this.getChannels()) {
-        const options = this.getOptions(channel);
-        if (options.actuatorIndex !== null) {
-          this._notifyOptionsChanged(channel, options);
+    for (const [channelName, t_canal] of Object.entries(channelTimings)) {
+      const channel = this.getChannel(channelName);
+      if (channel) {
+        const value = channel.interpolateAt(t_canal);
+        if (value !== null) {
+          result[channelName] = value;
         }
       }
     }
@@ -458,590 +230,512 @@ class FunscriptManager {
     return result;
   }
 
-  /**
-   * Méthode privée pour effectuer le mapping (logique existante)
-   */
-  _performAutoMapping(capabilities = null) {
-    const channels = this.getChannels();
-    if (channels.length === 0) {
-      return { mapped: 0, total: 0, mode: 'no channels' };
+  interpolateChannel(channelName, time) {
+    const channel = this.getChannel(channelName);
+    return channel ? channel.interpolateAt(time) : null;
+  }
+
+  // ============================================================================
+  // SECTION 4: AUTO-MAPPING OPTIMISÉ avec likely_capability
+  // ============================================================================
+
+  autoMapChannels(actuators) {
+    if (this.channels.length === 0) {
+      this.notify?.('status:funscript', { message: 'No channels available for auto-mapping', type: 'info' });
+      return { suggestions: [], mapped: 0, total: 0, mode: 'no channels' };
     }
 
-    let mapped = 0;
-    const isVirtualMode = !capabilities || !capabilities.actuators || capabilities.actuators.length === 0;
+    if (!actuators || actuators.length === 0) {
+      this.notify?.('status:funscript', { message: 'No actuators available for auto-mapping', type: 'info' });
+      return { suggestions: [], mapped: 0, total: this.channels.length, mode: 'no actuators' };
+    }
 
-    channels.forEach((channel, index) => {
-      const channelLower = channel.toLowerCase();
-      let actuatorIndex = null;
+    this.notify?.('status:funscript', { message: `Starting auto-mapping for ${this.channels.length} channels with ${actuators.length} actuators...`, type: 'processing' });
 
-      if (isVirtualMode) {
-        // Mode virtuel : mapping simple par index cyclique
-        actuatorIndex = index % 4;
+    const suggestions = [];
+    let mappedCount = 0;
+
+    for (const channel of this.channels) {
+      // Utiliser directement channel.likelyCapability au lieu de re-analyser le nom
+      const bestActuator = this._findBestActuatorMatch(channel, actuators);
+      
+      if (bestActuator) {
+        suggestions.push({
+          channelName: channel.name,
+          actuatorIndex: bestActuator.index,
+          confidence: 'high', // Basé sur likely_capability, donc high confidence
+          reason: `${channel.likelyCapability} match`
+        });
+        mappedCount++;
       } else {
-        // Mode device réel : mapping intelligent par nom + fallback
-        actuatorIndex = this._getSmartActuatorMapping(channelLower, capabilities);
-      }
-
-      if (actuatorIndex !== null) {
-        this.setOptions(channel, { actuatorIndex }); // Utilisera _notifyOptionsChanged
-        mapped++;
-      }
-    });
-
-    const mode = isVirtualMode ? 'virtual actuators' : 'device actuators';
-    return { mapped, total: channels.length, mode };
-  }
-
-  /**
-   * Mapping intelligent d'un canal vers un actuateur selon son nom et les capabilities
-   * @private
-   */
-  _getSmartActuatorMapping(channelLower, capabilities) {
-    // 1. Mapping par nom de canal
-    if (channelLower.includes('vibrat') || channelLower.includes('vibe')) {
-      return this._getFirstActuatorOfType('vibrate', capabilities);
-    }
-    
-    if (channelLower.includes('linear') || channelLower.includes('stroke') || channelLower.includes('pos')) {
-      return this._getFirstActuatorOfType('linear', capabilities);
-    }
-    
-    if (channelLower.includes('rotat') || channelLower.includes('twist')) {
-      return this._getFirstActuatorOfType('rotate', capabilities);
-    }
-    
-    if (channelLower.includes('oscillat')) {
-      return this._getFirstActuatorOfType('oscillate', capabilities);
-    }
-
-    // 2. Fallback : ordre de priorité par défaut
-    return this._getFirstActuatorOfType('linear', capabilities) ||
-           this._getFirstActuatorOfType('vibrate', capabilities) ||
-           this._getFirstActuatorOfType('oscillate', capabilities) ||
-           this._getFirstActuatorOfType('rotate', capabilities);
-  }
-
-  /**
-   * Trouve le premier actuateur du type demandé
-   * @private
-   */
-  _getFirstActuatorOfType(type, capabilities) {
-    if (!capabilities?.actuators) return null;
-
-    for (let i = 0; i < capabilities.actuators.length; i++) {
-      const actuator = capabilities.actuators[i];
-      if (actuator[type]) {
-        return i;
+        this.notify?.('status:funscript', { message: `No compatible actuator found for channel "${channel.name}" (${channel.type}, likely: ${channel.likelyCapability})`, type: 'warning' });
       }
     }
-    return null;
-  }
 
-  // ============================================================================
-  // NOUVELLES MÉTHODES D'ACCÈS AUX MÉTADONNÉES
-  // ============================================================================
+    const mode = mappedCount === this.channels.length ? 'complete' : 
+                 mappedCount > 0 ? 'partial' : 'none';
 
-  getChannelMetadata(channel) {
-    return this.channelMetadata?.get(channel) || {};
-  }
-
-  getAllChannelMetadata() {
-    if (!this.channelMetadata) return {};
-    const result = {};
-    for (const [channel, metadata] of this.channelMetadata.entries()) {
-      result[channel] = metadata;
-    }
-    return result;
-  }
-
-  // Méthode utilitaire pour l'auto-mapping intelligent
-  getChannelSuggestedActuator(channel) {
-    const metadata = this.getChannelMetadata(channel);
-    
-    // 1. Hint explicite depuis métadonnées
-    if (metadata.actuatorHint !== undefined) {
-      return metadata.actuatorHint;
-    }
-    
-    // 2. Mapping par type détecté
-    const typeMapping = {
-      'linear': 0,     // Premier actuateur linéaire
-      'vibrate': 1,    // Premier actuateur vibration  
-      'rotate': 2,     // Premier actuateur rotation
-      'oscillate': 3   // Premier actuateur oscillation
-    };
-    
-    return typeMapping[metadata.type] || null;
-  }
-  enable(channel, enabled = true) {
-    return this.setOptions(channel, { enabled });
-  }
-
-  setScale(channel, scale) {
-    return this.setOptions(channel, { scale });
-  }
-
-  setOffset(channel, timeOffset) {
-    return this.setOptions(channel, { timeOffset });
-  }
-
-  setInvert(channel, invert) {
-    return this.setOptions(channel, { invert });
-  }
-
-  setActuator(channel, actuatorIndex) {
-    return this.setOptions(channel, { actuatorIndex });
-  }
-
-  // Debug info avec métadonnées enrichies
-  getDebugInfo() {
-    if (!this.data) return { loaded: false };
-
-    const channelInfo = {};
-    for (const [channel, actions] of this.channels.entries()) {
-      const values = actions.map(a => a.value);
-      const cache = this.interpolationCache.get(channel);
-      const metadata = this.getChannelMetadata(channel);
-      
-      channelInfo[channel] = {
-        count: actions.length,
-        timeRange: actions.length > 0 ? [actions[0].time, actions[actions.length - 1].time] : null,
-        valueRange: values.length > 0 ? [Math.min(...values), Math.max(...values)] : null,
-        options: this.getOptions(channel),
-        // ✅ NOUVEAU: Métadonnées du canal
-        metadata: metadata,
-        suggestedActuator: this.getChannelSuggestedActuator(channel),
-        // Cache info
-        cache: cache ? {
-          leftIndex: cache.leftIndex,
-          rightIndex: cache.rightIndex,
-          lastTime: cache.lastTime
-        } : null
-      };
-    }
+    this.notify?.('status:funscript', { message: `Auto-mapping complete: ${mappedCount}/${this.channels.length} channels mapped`, type: mappedCount > 0 ? 'success' : 'warning' });
 
     return {
-      loaded: true,
-      duration: this.duration,
-      globalScale: this.globalScale,
-      globalOffset: this.globalOffset,
-      channels: channelInfo,
-      // Stats globales du cache
-      cacheStats: {
-        activeCaches: this.interpolationCache.size,
-        seekThreshold: this.seekThreshold
-      }
+      suggestions,
+      mapped: mappedCount,
+      total: this.channels.length,
+      mode
     };
   }
 
-  // Private methods (inchangés sauf _reset)
-  _extractChannels() {
-    this.channels.clear();
+  /**
+   * ✅ SIMPLIFIÉ: Trouve le meilleur actuateur pour un canal basé sur likely_capability
+   */
+  _findBestActuatorMatch(channel, actuators) {
+    // Filtrer les actuateurs compatibles (même type SCALAR/POLAR)
+    const compatibleActuators = actuators.filter(actuator => 
+      actuator.settings.enabled && channel.canPlugTo(actuator)
+    );
 
-    // ✅ NOUVEAU: Exploitation des métadonnées pour détection intelligente
+    if (compatibleActuators.length === 0) {
+      this.notify?.('status:funscript', { message: `No compatible actuators for channel "${channel.name}" (${channel.type})`, type: 'log' });
+      return null;
+    }
+
+    // 1. Priorité 1 : Match exact avec likely_capability
+    const exactMatch = compatibleActuators.find(actuator => 
+      actuator.capability === channel.likelyCapability
+    );
     
-    // 1. Essayer d'extraire les infos depuis les métadonnées globales
+    if (exactMatch) {
+      this.notify?.('status:funscript', { message: `Perfect match: ${channel.name} → ${exactMatch.capability} (likely_capability match)`, type: 'log' });
+      return exactMatch;
+    }
+
+    // 2. Priorité 2 : Ordre de priorité par défaut
+    const priorityOrder = ['linear', 'vibrate', 'oscillate', 'rotate'];
+    for (const capability of priorityOrder) {
+      const actuator = compatibleActuators.find(a => a.capability === capability);
+      if (actuator) {
+        this.notify?.('status:funscript', { message: `Fallback mapping: ${channel.name} → ${capability} (priority order)`, type: 'log' });
+        return actuator;
+      }
+    }
+    
+    // 3. Dernier recours : premier compatible
+    const fallbackActuator = compatibleActuators[0] || null;
+    if (fallbackActuator) {
+      this.notify?.('status:funscript', { message: `Last resort mapping: ${channel.name} → ${fallbackActuator.capability} (first available)`, type: 'log' });
+    }
+    return fallbackActuator;
+  }
+
+  // ============================================================================
+  // SECTION 5: FUNSCRIPT PARSING SIMPLIFIÉ
+  // ============================================================================
+
+  /**
+   * Extrait tous les canaux du funscript en créant des instances Channel
+   */
+  _extractChannels() {
+    this.channels = [];
+
+    this.notify?.('status:funscript', { message: 'Extracting channels from funscript data...', type: 'processing' });
+
+    // 1. Extraire les métadonnées globales (si disponibles)
     const metadata = this._extractMetadata();
     
     // 2. Format standard single-channel (toujours en premier)
     if (this.data.actions?.length) {
-      this._processActions('pos', this.data.actions, metadata);
+      const channel = this._createChannelFromActions('pos', this.data.actions, metadata);
+      if (channel) {
+        this.channels.push(channel);
+        this.notify?.('status:funscript', { message: `Found main channel: ${channel.name} (${this.data.actions.length} actions)`, type: 'log' });
+      }
     }
 
-    // 3. ✅ NOUVEAU: Détection flexible des canaux multi-axes
+    // 3. Détection flexible des canaux multi-axes
     this._extractMultiAxisChannels(metadata);
 
     // 4. Format tracks nested (format alternatif)
     if (this.data.tracks) {
+      this.notify?.('status:funscript', { message: `Processing ${Object.keys(this.data.tracks).length} nested tracks...`, type: 'log' });
       for (const [trackName, trackData] of Object.entries(this.data.tracks)) {
         if (trackData.actions?.length) {
           const trackMetadata = { ...metadata, ...trackData.metadata };
-          this._processActions(trackName, trackData.actions, trackMetadata);
+          const channel = this._createChannelFromActions(trackName, trackData.actions, trackMetadata);
+          if (channel) {
+            this.channels.push(channel);
+            this.notify?.('status:funscript', { message: `Found track channel: ${channel.name} (${trackData.actions.length} actions)`, type: 'log' });
+          }
         }
       }
     }
 
-    if (this.channels.size === 0) {
-      throw new Error('No valid channels found');
+    if (this.channels.length === 0) {
+      throw new Error('No valid channels found in funscript data');
     }
+
+    this.notify?.('status:funscript', { message: `Channel extraction complete: ${this.channels.length} channels created`, type: 'success' });
   }
 
-  // ✅ NOUVELLE MÉTHODE: Extraction intelligente des métadonnées
-  _extractMetadata() {
-    const metadata = {
-      // Métadonnées globales du script
-      title: this.data.title || this.data.metadata?.title,
-      creator: this.data.creator || this.data.metadata?.creator,
-      description: this.data.description || this.data.metadata?.description,
-      duration: this.data.duration || this.data.metadata?.duration,
-      
-      // ✅ NOUVEAU: Infos sur les axes/canaux
-      axes: this.data.axes || this.data.metadata?.axes || {},
-      channels: this.data.channels || this.data.metadata?.channels || {},
-      actuators: this.data.actuators || this.data.metadata?.actuators || {},
-      
-      // Type de device ciblé
-      device: this.data.device || this.data.metadata?.device,
-      deviceType: this.data.deviceType || this.data.metadata?.deviceType,
-      
-      // Infos de mapping
-      mapping: this.data.mapping || this.data.metadata?.mapping || {}
-    };
-    
-    return metadata;
-  }
-
-  // ✅ NOUVELLE MÉTHODE: Détection flexible des canaux multi-axes
+  /**
+   * Scan des canaux multi-axes dans les propriétés root
+   */
   _extractMultiAxisChannels(metadata) {
-    // Rechercher tous les champs qui contiennent des arrays d'actions
+    this.notify?.('status:funscript', { message: 'Scanning for multi-axis channels...', type: 'log' });
+
+    let foundMultiAxis = 0;
     for (const [key, value] of Object.entries(this.data)) {
       if (this._isActionArray(value)) {
-        // Éviter de retraiter 'actions' (déjà fait)
-        if (key === 'actions') continue;
+        if (key === 'actions') continue; // Éviter de retraiter 'actions'
         
-        // Déterminer le type/nom du canal à partir des métadonnées ou heuristiques
-        const channelInfo = this._analyzeChannelFromMetadata(key, value, metadata);
-        
-        this._processActions(channelInfo.name, value, { 
-          ...metadata, 
-          ...channelInfo.metadata 
-        });
+        const channel = this._createChannelFromActions(key, value, metadata);
+        if (channel) {
+          this.channels.push(channel);
+          foundMultiAxis++;
+        }
       }
+    }
+
+    if (foundMultiAxis > 0) {
+      this.notify?.('status:funscript', { message: `Found ${foundMultiAxis} multi-axis channels`, type: 'log' });
     }
   }
 
-  // ✅ NOUVELLE MÉTHODE: Test si un objet est un array d'actions valide
+  /**
+   * Test si un objet est un array d'actions valide
+   */
   _isActionArray(value) {
     return Array.isArray(value) && 
            value.length > 0 && 
            value.every(action => 
              typeof action === 'object' && 
              action !== null &&
-             // ✅ SEUL CRITÈRE SÛR: présence du timestamp
              (action.at !== undefined || action.t !== undefined || action.time !== undefined)
            );
   }
 
-  // ✅ NOUVELLE MÉTHODE: Analyse intelligente du canal depuis métadonnées + heuristiques
-  _analyzeChannelFromMetadata(fieldName, actions, metadata) {
-    let channelName = fieldName;
-    let channelType = 'unknown';
-    let actuatorHint = null;
-    
-    // 1. ✅ PRIORITÉ: Métadonnées explicites
-    if (metadata.channels && metadata.channels[fieldName]) {
-      const channelMeta = metadata.channels[fieldName];
-      channelName = channelMeta.name || channelMeta.displayName || fieldName;
-      channelType = channelMeta.type || channelMeta.actuatorType;
-      actuatorHint = channelMeta.actuator || channelMeta.actuatorIndex;
-    }
-    
-    // 2. ✅ FALLBACK: Mapping explicite 
-    else if (metadata.mapping && metadata.mapping[fieldName]) {
-      const mapping = metadata.mapping[fieldName];
-      channelName = mapping.name || fieldName;
-      channelType = mapping.type;
-      actuatorHint = mapping.actuator;
-    }
-    
-    // 3. ✅ FALLBACK: Analyse heuristique du nom de champ
-    else {
-      const analysis = this._heuristicChannelAnalysis(fieldName, actions);
-      channelName = analysis.name;
-      channelType = analysis.type;
-    }
-    
-    return {
-      name: channelName,
-      metadata: {
-        type: channelType,
-        actuatorHint: actuatorHint,
-        originalField: fieldName,
-        source: metadata.channels?.[fieldName] ? 'metadata' : 
-                metadata.mapping?.[fieldName] ? 'mapping' : 'heuristic'
-      }
-    };
-  }
+  /**
+   * ✅ SIMPLIFIÉ: Création d'une instance Channel (heuristique déléguée au Channel)
+   */
+  _createChannelFromActions(fieldName, actions, metadata = {}) {
+    try {
+      this.notify?.('status:funscript', { message: `Creating channel from field: ${fieldName} (${actions.length} actions)`, type: 'log' });
 
-  // ✅ NOUVELLE MÉTHODE: Analyse heuristique améliorée
-  _heuristicChannelAnalysis(fieldName, actions) {
-    const nameLower = fieldName.toLowerCase();
-    
-    // Patterns de détection par nom
-    const patterns = {
-      // Mouvement linéaire
-      linear: /^(pos|position|stroke|linear|up|down|vertical|y)$/i,
-      
-      // Vibration
-      vibrate: /^(vib|vibr|vibrat|buzz|rumble|shake)$/i,
-      
-      // Rotation  
-      rotate: /^(rot|rotat|twist|spin|turn|roll|angle|pitch|yaw)$/i,
-      
-      // Oscillation
-      oscillate: /^(osc|oscill|swing|wave|sway)$/i,
-      
-      // Autres mouvements
-      squeeze: /^(squeeze|constrict|pressure|grip|clamp)$/i,
-      suck: /^(suck|suction|vacuum|pump)$/i,
-      
-      // Axes géométriques
-      x_axis: /^(x|horizontal|left|right|lateral)$/i,
-      z_axis: /^(z|depth|forward|back|front|rear)$/i
-    };
-    
-    // ✅ NOUVEAU: Analyse des valeurs pour affiner le type
-    const valueAnalysis = this._analyzeActionValues(actions);
-    
-    for (const [type, regex] of Object.entries(patterns)) {
-      if (regex.test(nameLower)) {
-        return {
-          name: fieldName,
-          type: type.replace('_axis', ''),
-          confidence: 'high',
-          valueRange: valueAnalysis.range,
-          isBipolar: valueAnalysis.isBipolar
+      // 1. Configuration utilisateur explicite (priorité absolue)
+      if (this.customFieldConfig && this.customFieldConfig[fieldName]) {
+        const userConfig = this.customFieldConfig[fieldName];
+        const fieldConfig = {
+          timeField: userConfig.timeField || 'at',
+          valueField: userConfig.valueField || 'pos',
+          directionField: userConfig.directionField || null,
+          durationField: userConfig.durationField || null
         };
+        
+        this.notify?.('status:funscript', { message: `Using user-defined config for ${fieldName}`, type: 'success' });
+        
+        return new Channel(fieldName, actions, fieldConfig, {
+          ...metadata,
+          originalField: fieldName
+        }, this.notify);
       }
-    }
-    
-    // ✅ FALLBACK: Analyse par valeurs si nom inconnu
-    if (valueAnalysis.isBipolar) {
-      return { name: fieldName, type: 'rotate', confidence: 'low' };
-    } else {
-      return { name: fieldName, type: 'linear', confidence: 'low' };
+
+      // 2. Configuration basique avec détection automatique des champs
+      const fieldConfig = this._buildBasicFieldConfig(fieldName, actions, metadata);
+      
+      const channel = new Channel(fieldName, actions, fieldConfig, {
+        ...metadata,
+        originalField: fieldName
+      }, this.notify);
+
+      this.notify?.('status:funscript', { message: `Channel created: ${channel.name} (${channel.type}, likely: ${channel.likelyCapability}, ${channel.actions.length} actions)`, type: 'log' });
+      
+      return channel;
+      
+    } catch (error) {
+      this.notify?.('status:funscript', { message: `Failed to create channel "${fieldName}": ${error.message}`, type: 'error' });
+      return null;
     }
   }
 
-  // ✅ NOUVELLE MÉTHODE: Analyse des valeurs d'actions pour déduire le type
-  _analyzeActionValues(actions) {
+  /**
+   * ✅ NOUVEAU: Construit un fieldConfig basique en détectant les champs disponibles
+   */
+  _buildBasicFieldConfig(fieldName, actions, metadata) {
     if (actions.length === 0) {
-      return { range: [0, 0], isBipolar: false };
+      return { timeField: 'at', valueField: 'pos' };
     }
+
+    const firstAction = actions[0];
+    const availableFields = Object.keys(firstAction);
+
+    // Détecter timeField
+    const timeField = this._detectTimeField(availableFields);
     
-    // Extraire toutes les valeurs possibles (champs flexibles)
-    const values = actions.map(action => {
-      return action.pos !== undefined ? action.pos :
-             action.v !== undefined ? action.v :
-             action.value !== undefined ? action.value :
-             action.val !== undefined ? action.val :
-             action.position !== undefined ? action.position :
-             action.intensity !== undefined ? action.intensity :
-             0; // fallback
-    }).filter(v => typeof v === 'number');
+    // Détecter valueField  
+    const valueField = this._detectValueField(availableFields, fieldName);
     
-    if (values.length === 0) {
-      return { range: [0, 0], isBipolar: false };
-    }
+    // Détecter directionField optionnel
+    const directionField = this._detectDirectionField(availableFields);
     
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const hasNegative = min < 0;
-    const hasPositive = max > 0;
-    
+    // Détecter durationField optionnel
+    const durationField = this._detectDurationField(availableFields);
+
+    this.notify?.('status:funscript', { message: `Field detection for ${fieldName}: time=${timeField}, value=${valueField}, direction=${directionField || 'none'}, duration=${durationField || 'none'}`, type: 'log' });
+
     return {
-      range: [min, max],
-      isBipolar: hasNegative && hasPositive, // Valeurs des deux côtés de zéro
-      span: max - min
+      timeField,
+      valueField,
+      directionField,
+      durationField
     };
   }
 
-  _processActions(channel, actions, metadata = {}) {
-    const processed = [];
-    const isRotate = metadata.type === 'rotate' || this._isRotateChannel(channel);
-
-    // ✅ NOUVEAU: Première passe - extraction flexible des valeurs
-    const rawValues = [];
-    for (const action of actions) {
-      const time = action.at || action.t || action.time;
-      let value;
-
-      if (isRotate) {
-        value = this._extractRotateValue(action);
-      } else {
-        // ✅ NOUVEAU: Extraction flexible des valeurs selon métadonnées ou heuristique
-        value = this._extractActionValue(action, metadata);
+  /**
+   * Détecte le champ temps dans les actions
+   */
+  _detectTimeField(availableFields) {
+    const timeFields = ['at', 't', 'time', 'timestamp'];
+    for (const field of timeFields) {
+      if (availableFields.includes(field)) {
+        return field;
       }
-
-      if (typeof time !== 'number' || typeof value !== 'number') continue;
-
-      rawValues.push({ time, value });
     }
-
-    if (rawValues.length === 0) return;
-
-    // Renormalisation universelle par max absolu
-    const { normalizedValues, detectedConvention } = this._detectAndNormalize(rawValues, isRotate);
-
-    // ✅ NOUVEAU: Log enrichi avec métadonnées
-    const sourceInfo = metadata.source ? ` (${metadata.source})` : '';
-    const typeInfo = metadata.type ? ` [${metadata.type}]` : '';
-    console.log(`Channel "${channel}"${typeInfo}: ${detectedConvention} (${rawValues.length} actions)${sourceInfo}`);
-
-    // Construction finale avec valeurs normalisées
-    for (const { time, value } of normalizedValues) {
-      processed.push({ time, value });
-    }
-
-    if (processed.length > 0) {
-      processed.sort((a, b) => a.time - b.time);
-      this.channels.set(channel, processed);
-      
-      // ✅ NOUVEAU: Stocker les métadonnées du canal pour usage ultérieur
-      if (!this.channelMetadata) this.channelMetadata = new Map();
-      this.channelMetadata.set(channel, metadata);
-    }
+    return 'at'; // fallback
   }
 
-  // ✅ NOUVELLE MÉTHODE: Extraction flexible des valeurs d'action
-  _extractActionValue(action, metadata = {}) {
-    // 1. ✅ PRIORITÉ: Champ spécifié dans les métadonnées
-    if (metadata.valueField && action[metadata.valueField] !== undefined) {
-      return action[metadata.valueField];
+  /**
+   * Détecte le champ valeur principal
+   */
+  _detectValueField(availableFields, fieldName) {
+    // Essayer des noms liés au fieldName d'abord
+    if (availableFields.includes(fieldName.toLowerCase())) {
+      return fieldName.toLowerCase();
     }
-    
-    // 2. ✅ FALLBACK: Ordre de priorité standard mais flexible
+
+    // Standards communs
     const valueFields = [
-      'pos', 'position',           // Position classique
-      'v', 'val', 'value',         // Valeur générique
-      'intensity', 'power',        // Intensité
-      'speed', 'velocity',         // Vitesse
-      'amplitude', 'magnitude',    // Amplitude
-      'level', 'strength'          // Niveau/Force
+      'pos', 'position', 'value', 'val', 'v',
+      'speed', 'spd', 's',
+      'scalar', 'intensity', 'i'
     ];
     
     for (const field of valueFields) {
-      if (action[field] !== undefined) {
-        return action[field];
+      if (availableFields.includes(field)) {
+        return field;
       }
     }
     
-    // 3. ✅ DERNIER RECOURS: Chercher le premier champ numérique (hors temps)
-    for (const [key, value] of Object.entries(action)) {
-      if (typeof value === 'number' && !['at', 't', 'time'].includes(key)) {
-        console.warn(`Using fallback field "${key}" for action value`);
-        return value;
-      }
-    }
-    
-    return 0; // Fallback absolu
+    return 'pos'; // fallback
   }
 
-  // ✅ NOUVELLE MÉTHODE: Renormalisation universelle par max absolu
-  _detectAndNormalize(rawValues, isRotate) {
-    if (rawValues.length === 0) {
-      return { normalizedValues: [], detectedConvention: 'empty' };
-    }
-
-    // ✅ RENORMALISATION UNIVERSELLE: Utilise toujours la plage dynamique complète
-    // Après cette étape, toutes les valeurs sont dans [0,1] ou [-1,1]
-    // Le paramètre 'scale' devient alors un vrai % d'intensité max du jouet
-    const absValues = rawValues.map(item => Math.abs(item.value));
-    const maxAbsValue = Math.max(...absValues);
+  /**
+   * Détecte le champ direction optionnel
+   */
+  _detectDirectionField(availableFields) {
+    const directionFields = [
+      'clockwise', 'cw', 'direction', 'dir',
+      'ccw', 'counterclockwise'
+    ];
     
-    // Éviter la division par zéro (cas où toutes les valeurs sont 0)
-    const normalizationFactor = maxAbsValue > 0 ? (1 / maxAbsValue) : 1;
-    
-    // Log de la normalisation appliquée
-    const scalingInfo = maxAbsValue > 0 ? 
-      `max=${maxAbsValue.toFixed(2)} -> factor=${normalizationFactor.toFixed(4)}` : 
-      'all zeros';
-
-    // Appliquer la renormalisation universelle
-    const normalizedValues = rawValues.map(({ time, value }) => {
-      let normalizedValue = value * normalizationFactor;
-      
-      // Clamp selon le type de canal (sécurité)
-      if (isRotate) {
-        normalizedValue = Math.max(-1, Math.min(1, normalizedValue));
-      } else {
-        normalizedValue = Math.max(0, Math.min(1, normalizedValue));
+    for (const field of directionFields) {
+      if (availableFields.includes(field)) {
+        return field;
       }
+    }
+    
+    return null; // Pas de champ direction trouvé
+  }
 
-      return { time, value: normalizedValue };
-    });
+  /**
+   * Détecte le champ durée optionnel
+   */
+  _detectDurationField(availableFields) {
+    const durationFields = ['duration', 'dur', 'd'];
+    
+    for (const field of durationFields) {
+      if (availableFields.includes(field)) {
+        return field;
+      }
+    }
+    
+    return null; // Pas de champ durée trouvé
+  }
 
-    return { 
-      normalizedValues, 
-      detectedConvention: scalingInfo
+  /**
+   * Extrait métadonnées du funscript
+   */
+  _extractMetadata() {
+    if (!this.data) return {};
+    
+    return {
+      metadata: this.data.metadata || {},
+      channels: this.data.channels || {},
+      mapping: this.data.mapping || {},
+      ...this.data.metadata // Flatten au niveau racine
     };
   }
 
-  _isRotateChannel(channel) {
-    return /rotate|rotation|twist|spin|turn/i.test(channel);
-  }
-
-  _extractRotateValue(action) {
-    // ✅ MODIFIÉ: Extraction brute sans normalisation prématurée
-    // La normalisation se fera dans _detectAndNormalize()
-    
-    if (action.pos !== undefined) {
-      return action.pos;
-    }
-    if (action.rotate !== undefined) {
-      return action.rotate;
-    }
-    if (action.speed !== undefined && action.clockwise !== undefined) {
-      // Préserver le signe selon la direction
-      const speed = Math.abs(action.speed);
-      return action.clockwise ? speed : -speed;
-    }
-    if (action.v !== undefined) {
-      return action.v;
-    }
-    return 0;
-  }
-
+  /**
+   * Calcule la durée totale du funscript
+   */
   _calculateDuration() {
-    let maxTime = 0;
-    for (const actions of this.channels.values()) {
-      if (actions.length > 0) {
-        maxTime = Math.max(maxTime, actions[actions.length - 1].time);
+    this.duration = Math.max(
+      ...this.channels.map(channel => channel.duration),
+      0
+    );
+  }
+
+  // ============================================================================
+  // SECTION 6: HELPERS ET DEBUG
+  // ============================================================================
+
+  /**
+   * ✅ NOUVEAU: Retourne les likely_capability de tous les canaux
+   */
+  getChannelSuggestions() {
+    return this.channels.map(channel => ({
+      name: channel.name,
+      type: channel.type,
+      likelyCapability: channel.likelyCapability,
+      actionCount: channel.getActionCount(),
+      duration: channel.duration
+    }));
+  }
+
+  /**
+   * Informations de debug complètes
+   */
+  getDebugInfo() {
+    return {
+      loaded: this.hasFunscript(),
+      channelCount: this.channels.length,
+      duration: this.duration,
+      channels: this.channels.map(ch => ({
+        name: ch.name,
+        type: ch.type,
+        likelyCapability: ch.likelyCapability,
+        actionCount: ch.getActionCount(),
+        connectedActuators: ch.getConnectedActuators().length
+      })),
+      customFieldConfig: this.customFieldConfig,
+      dataKeys: this.data ? Object.keys(this.data) : []
+    };
+  }
+
+  /**
+   * Métadonnées d'un canal spécifique
+   */
+  getChannelMetadata(channelName) {
+    const channel = this.getChannel(channelName);
+    return channel ? channel.getMetadata() : {};
+  }
+
+  /**
+   * Vérifie si un canal a des valeurs négatives
+   */
+  hasNegativeValues(channelName) {
+    const channel = this.getChannel(channelName);
+    return channel ? channel.type === HapticType.POLAR : false;
+  }
+
+  // ============================================================================
+  // SECTION 7: DÉTECTION DES CHAMPS POUR CHANNELSETTINGS
+  // ============================================================================
+
+  /**
+   * ✅ NOUVEAU: Analyse des champs disponibles dans chaque canal pour ChannelSettings
+   */
+  getDetectedFields() {
+    if (!this.data) return {};
+    
+    const detectedFields = {};
+    
+    // Analyser le canal principal
+    if (this.data.actions?.length > 0) {
+      detectedFields['pos'] = this._analyzeFieldsInActions(this.data.actions);
+    }
+    
+    // Analyser les canaux multi-axes
+    for (const [key, value] of Object.entries(this.data)) {
+      if (this._isActionArray(value) && key !== 'actions') {
+        detectedFields[key] = this._analyzeFieldsInActions(value);
       }
     }
-    this.duration = maxTime / 1000; // Convert to seconds
-  }
-
-  _initOptions() {
-    this.options.clear();
-    for (const channel of this.getChannels()) {
-      this.options.set(channel, { ...this.defaults });
+    
+    // Analyser les tracks nested
+    if (this.data.tracks) {
+      for (const [trackName, trackData] of Object.entries(this.data.tracks)) {
+        if (trackData.actions?.length) {
+          detectedFields[trackName] = this._analyzeFieldsInActions(trackData.actions);
+        }
+      }
     }
+    
+    return detectedFields;
   }
 
-  _validateOptions(opts) {
-    return typeof opts.enabled === 'boolean' &&
-           typeof opts.scale === 'number' && opts.scale >= 0 && opts.scale <= 5.0 && // ✅ MODIFIÉ: Permet boost jusqu'à 500%
-           typeof opts.timeOffset === 'number' && Math.abs(opts.timeOffset) <= 10.0 && // ✅ MODIFIÉ: Limite offset à ±10s
-           typeof opts.invert === 'boolean' &&
-           (opts.actuatorIndex === null || (typeof opts.actuatorIndex === 'number' && opts.actuatorIndex >= 0));
-  }
-
-  _processValue(rawValue, opts) {
-    let value = rawValue;
+  /**
+   * ✅ NOUVEAU: Analyse les champs dans un array d'actions
+   */
+  _analyzeFieldsInActions(actions) {
+    if (!actions || actions.length === 0) {
+      return {
+        availableTimeFields: ['at'],
+        availableValueFields: ['pos'],
+        availableDirectionFields: [],
+        availableDurationFields: [],
+        otherFields: [],
+        sampleAction: null
+      };
+    }
     
-    // Apply invert
-    if (opts.invert) value = 1 - value;
+    const firstAction = actions[0];
+    const allFields = Object.keys(firstAction);
     
-    // Apply individual channel scale
-    value *= opts.scale;
-    
-    // ✅ NOUVEAU: Apply global scale (master intensity control)
-    value *= this.globalScale;
-    
-    // Clamp final pour sécurité jouet
-    return Math.max(0, Math.min(1, value));
-  }
-
-  _reset() {
-    this.data = null;
-    this.channels.clear();
-    this.options.clear();
-    this.duration = 0;
-    this.globalOffset = 0.0;
-    this.globalScale = 1.0;  // ✅ NOUVEAU: Reset global scale
-    this._clearInterpolationCache();
-    this.channelMetadata?.clear();
+    return {
+      // Champs de temps (étendus avec conventions buttplug)
+      availableTimeFields: allFields.filter(k => {
+        const lower = k.toLowerCase();
+        return ['at', 't', 'time', 'timestamp', 'ms'].includes(lower);
+      }),
+      
+      // Champs de valeur (étendus avec conventions buttplug)
+      availableValueFields: allFields.filter(k => {
+        const lower = k.toLowerCase();
+        return ['pos', 'p', 'position', 'scalar', 'speed', 'spd', 's', 
+                'val', 'v', 'value', 'intensity', 'i'].includes(lower);
+      }),
+      
+      // Champs de direction (étendus avec conventions buttplug)
+      availableDirectionFields: allFields.filter(k => {
+        const lower = k.toLowerCase();
+        return ['clockwise', 'cw', 'direction', 'dir', 'ccw', 'counterclockwise'].includes(lower);
+      }),
+      
+      // Champs de durée (étendus avec conventions buttplug)
+      availableDurationFields: allFields.filter(k => {
+        const lower = k.toLowerCase();
+        return ['duration', 'dur', 'd', 'delay', 'ms', 'millis', 'time'].includes(lower);
+      }),
+      
+      // Autres champs (non reconnus)
+      otherFields: allFields.filter(k => {
+        const lower = k.toLowerCase();
+        const knownFields = [
+          // Time
+          'at', 't', 'time', 'timestamp', 'ms',
+          // Value
+          'pos', 'p', 'position', 'scalar', 'speed', 'spd', 's', 
+          'val', 'v', 'value', 'intensity', 'i',
+          // Direction
+          'clockwise', 'cw', 'direction', 'dir', 'ccw', 'counterclockwise',
+          // Duration
+          'duration', 'dur', 'd', 'delay', 'millis'
+        ];
+        return !knownFields.includes(lower);
+      }),
+      
+      sampleAction: firstAction
+    };
   }
 }
 

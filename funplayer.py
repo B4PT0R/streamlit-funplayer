@@ -188,7 +188,7 @@ def get_clean_playlist():
 header_col1, header_col2 = st.columns([3, 1])
 
 with header_col1:
-    st.title("🎮 FunPlayer Demo")
+    st.title("🎮 FunPlayer")
     st.markdown("**Interactive Media Player with Synchronized Haptic Feedback**")
 
 with header_col2:
@@ -454,13 +454,7 @@ if st.session_state.playlist:
             playlist=clean_playlist,
             key="main_player"
         )
-        
-        # Player info avec st.info natif
-        if len(clean_playlist) > 1:
-            st.info(f"🎵 Playlist mode: {len(clean_playlist)} items loaded")
-        else:
-            st.info("🎵 Single item mode")
-            
+
     except Exception as e:
         st.error(f"❌ Player error: {e}")
         with st.expander("🔧 Debug Info"):
@@ -529,10 +523,11 @@ with st.expander("🔧 Technical Details"):
     st.code("""
 # Playlist Format (Video.js Extended)
 playlist = [{
-    'sources': [{'src': 'video.mp4', 'type': 'video/mp4'}],  # Required
+    'sources': [{'src': 'video.mp4', 'type': 'video/mp4'}],  # Required (empty list for haptic only)
     'name': 'Scene Title',                                   # Recommended  
     'description': 'Scene description',                      # Optional
     'poster': 'poster.jpg',                                  # Optional
+    'duration': time_in_s                                    # Optional but recommended
     'funscript': {'actions': [...]},                         # FunPlayer extension
 }]
     """, language="python")

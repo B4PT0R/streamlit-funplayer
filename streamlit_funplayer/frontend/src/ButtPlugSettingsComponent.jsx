@@ -1,9 +1,14 @@
 import React, { Component } from 'react';
-import managers from './Managers'; // ✅ SEULE IMPORT du singleton
+import core from './FunPlayerCore';
 
 /**
- * ButtPlugSettingsComponent - ✅ REFACTORISÉ: API Managers unifiée
- * Plus aucune référence locale aux managers, tout passe par le singleton
+ * ButtPlugSettingsComponent - ✅ NETTOYÉ: UI pure sans notifications
+ * 
+ * RESPONSABILITÉS SIMPLIFIÉES:
+ * - Barre horizontale compacte (status + actions)
+ * - Appels directs core.xxx (pas d'indirections)
+ * - Re-render sur événements choisis uniquement
+ * - ✅ CLEAN: Pas de notifications status (c'est aux managers de le faire)
  */
 class ButtPlugSettingsComponent extends Component {
   constructor(props) {
@@ -14,127 +19,83 @@ class ButtPlugSettingsComponent extends Component {
       renderTrigger: 0
     };
     
-    this.managersListener = null;
+    this.coreListener = null;
   }
 
   componentDidMount() {
-    // ✅ Écouter les événements pour re-render
-    this.managersListener = managers.addListener(this.handleManagerEvent);
+    this.coreListener = core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
-    if (this.managersListener) {
-      this.managersListener();
-      this.managersListener = null;
+    if (this.coreListener) {
+      this.coreListener();
+      this.coreListener = null;
     }
   }
 
   // ============================================================================
-  // ✅ GESTION D'ÉVÉNEMENTS AVEC API MANAGERS UNIFIÉE
+  // GESTION D'ÉVÉNEMENTS SIMPLIFIÉE - Juste re-render
   // ============================================================================
 
-  handleManagerEvent = (event, data) => {
-    // ✅ Re-render sur événements qui impactent ce composant
+  handleEvent = (event, data) => {
     const eventsToReact = [
-      'buttplug:connection',     // État de connexion changé
-      'buttplug:device',         // Device sélectionné changé
-      'funscript:load',          // Funscript chargé (impact les boutons)
-      'funscript:channels',      // Canaux changés (impact les boutons)
-      'managers:autoConnect'     // AutoConnect terminé
+      'buttplug:connection',
+      'buttplug:device', 
+      'funscript:load',
+      'funscript:channels',
+      'core:autoConnect'
     ];
     
     if (eventsToReact.some(e => event.startsWith(e.split(':')[0]))) {
-      // ✅ Trigger re-render via setState
+      if (event === 'core:autoConnect') {
+        this.setState({ isAutoConnecting: false });
+      }
+      
       this.setState(prevState => ({ 
         renderTrigger: prevState.renderTrigger + 1 
       }));
-      
-      // ✅ Gérer la fin d'autoConnect
-      if (event === 'managers:autoConnect') {
-        this.setState({ isAutoConnecting: false });
-      }
     }
   }
 
   // ============================================================================
-  // ✅ GETTERS AVEC API MANAGERS UNIFIÉE (remplace les props)
-  // ============================================================================
-
-  getButtPlugStatus = () => {
-    // ✅ MODIFIÉ: Accès direct via le singleton
-    return managers.buttplug?.getStatus() || { isConnected: false };
-  }
-
-  getFunscriptChannels = () => {
-    // ✅ MODIFIÉ: Accès direct via le singleton
-    return managers.funscript?.getChannels() || [];
-  }
-
-  getDevices = () => {
-    // ✅ MODIFIÉ: Accès direct via le singleton
-    return managers.buttplug?.getDevices() || [];
-  }
-
-  getSelectedDevice = () => {
-    // ✅ MODIFIÉ: Accès direct via le singleton
-    return managers.buttplug?.getSelected() || null;
-  }
-
-  // ✅ SUPPRIMÉ: Plus de propriété computed buttplug
-  // get buttplug() { return managers.buttplug; } // ❌
-
-  // ============================================================================
-  // ✅ ACTIONS - Appels directs au singleton
+  // ACTIONS SIMPLIFIÉES - Appels directs core, pas d'indirections
   // ============================================================================
 
   handleAutoConnect = async () => {
-    if (this.state.isAutoConnecting) return;
-
     this.setState({ isAutoConnecting: true });
     
     try {
-      // ✅ MODIFIÉ: Appel direct à managers au lieu de prop callback
-      await managers.autoConnect(3000);
-      // ✅ L'événement 'managers:autoConnect' gérera le setState isAutoConnecting
-      
+      // Appel direct core - les notifications seront faites par les managers
+      const result = await core.autoConnect();
+      console.log('Auto-connect result:', result);
     } catch (error) {
-      console.error('AutoConnect failed:', error);
+      console.error('Auto-connect failed:', error);
+    } finally {
       this.setState({ isAutoConnecting: false });
     }
   }
 
   handleDisconnect = async () => {
     try {
-      // ✅ MODIFIÉ: Accès direct via le singleton
-      if (managers.buttplug) {
-        await managers.buttplug.disconnect();
-        // ✅ L'événement 'buttplug:connection' sera déclenché automatiquement
-      }
+      // Appel direct core - les notifications seront faites par ButtPlugManager
+      await core.buttplug.disconnect();
     } catch (error) {
-      console.error('Disconnect failed:', error);
+      console.error('Disconnection failed:', error);
     }
   }
 
-  handleDeviceChange = async (deviceIndex) => {
+  handleDeviceChange = (deviceIndex) => {
     try {
-      // ✅ MODIFIÉ: Accès direct via le singleton
-      if (managers.buttplug) {
-        const numericIndex = deviceIndex === '' ? null : parseInt(deviceIndex);
-        const success = managers.buttplug.selectDevice(numericIndex);
-        
-        if (success && numericIndex !== null) {
-          // Auto-map après sélection
-          managers.autoMapChannels();
-          // ✅ Les événements 'buttplug:device' et 'managers:autoMap' seront déclenchés
-        }
-      }
+      const numericIndex = deviceIndex === '-1' ? -1 : parseInt(deviceIndex);
+      // Appel direct core - les notifications seront faites par ButtPlugManager
+      core.buttplug.selectDevice(numericIndex);
     } catch (error) {
       console.error('Device selection failed:', error);
     }
   }
 
   // ============================================================================
-  // ✅ RENDER - Utilise les getters avec API Managers unifiée
+  // RENDER SIMPLIFIÉ - Accès direct aux données via core
   // ============================================================================
 
   render() {
@@ -143,12 +104,13 @@ class ButtPlugSettingsComponent extends Component {
       isSettingsExpanded 
     } = this.props;
     
-    // ✅ MODIFIÉ: Données récupérées via getters avec API Managers unifiée
     const { isAutoConnecting } = this.state;
-    const buttplugStatus = this.getButtPlugStatus();
-    const funscriptChannels = this.getFunscriptChannels();
-    const devices = this.getDevices();
-    const selectedDevice = this.getSelectedDevice();
+    
+    // Accès direct core pour toutes les données
+    const buttplugStatus = core.buttplug.getStatus();
+    const funscriptChannels = core.funscript.getChannelNames();
+    const devices = core.buttplug.getDevices();
+    const selectedDevice = core.buttplug.getSelected();
     
     const isConnected = buttplugStatus?.isConnected || false;
     
@@ -161,7 +123,7 @@ class ButtPlugSettingsComponent extends Component {
             {isConnected ? '🟢' : '🔴'}
           </span>
           <span className="fp-label fp-device-name">
-            {selectedDevice?.name || 'No device'}
+            {selectedDevice?.name || 'Unknown device'}
           </span>
           {funscriptChannels.length === 0 && (
             <span className="fp-unit" style={{ opacity: 0.5 }}>
@@ -199,29 +161,28 @@ class ButtPlugSettingsComponent extends Component {
           {/* Device selector */}
           <select
             className="fp-input fp-select fp-min-width"
-            value={selectedDevice?.index ?? ''}
+            value={selectedDevice?.index ?? -1}
             onChange={(e) => this.handleDeviceChange(e.target.value)}
             disabled={funscriptChannels.length === 0}
-            title={funscriptChannels.length === 0 ? "Load funscript first" : "Select device"}
+            title={funscriptChannels.length === 0 ? 
+              "Load funscript first" : 
+              "Select haptic device"}
           >
-            <option value="">Virtual</option>
             {devices.map(device => (
               <option key={device.index} value={device.index}>
-                {device.name}
+                {device.name} {device.index === -1 ? '(Virtual)' : ''}
               </option>
             ))}
           </select>
           
           {/* Settings toggle */}
-          {onToggleSettings && funscriptChannels.length > 0 && (
-            <button 
-              className="fp-btn fp-btn-ghost fp-chevron"
-              onClick={onToggleSettings}
-            >
-              {isSettingsExpanded ? '▲' : '▼'}
-            </button>
-          )}
-          
+          <button
+            className="fp-btn fp-btn-ghost fp-chevron"
+            onClick={onToggleSettings}
+            title={isSettingsExpanded ? "Hide haptic settings" : "Show haptic settings"}
+          >
+            {isSettingsExpanded ? '▲' : '▼'}
+          </button>
         </div>
       </div>
     );

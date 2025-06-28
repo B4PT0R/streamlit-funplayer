@@ -3,19 +3,17 @@ import MediaPlayer from './MediaPlayer';
 import PlaylistComponent from './PlaylistComponent';
 import HapticSettingsComponent from './HapticSettingsComponent';
 import HapticVisualizerComponent from './HapticVisualizerComponent';
-import managers from './Managers';
+import LoggingComponent from './LoggingComponent';
+import core from './FunPlayerCore';
 
 /**
- * FunPlayer - Composant principal orchestrant media + haptic + playlist
- * ✅ REFACTORISÉ: API Managers unifiée - managers.buttplug, managers.funscript, managers.playlist
+ * FunPlayer - ✅ REFACTORISÉ: Status notifications uniformisées + callback MediaPlayer
  */
 class FunPlayer extends Component {
   constructor(props) {
     super(props);
+    
     this.state = {
-      status: 'idle',
-      error: null,
-      isReady: false,
       updateRate: 60,
       isPlaying: false,
       currentActuatorData: new Map(),
@@ -26,138 +24,158 @@ class FunPlayer extends Component {
     
     this.mediaPlayerRef = React.createRef();
     
-    // Haptic loop
+    // Haptic loop technique (performance pure)
     this.hapticIntervalId = null;
     this.expectedHapticTime = 0;
     this.hapticTime = 0;
     this.lastMediaTime = 0;
     this.lastSyncTime = 0;
+
+    // ✅ MODIFIÉ: État buffering 
+    this.isBuffering = false;
+    this.bufferingStartTime = 0;
+    this.bufferingSource = null; // 'waiting' | 'stall_detection' | null
+    this.stallTimeoutId = null;
+    this.stallTimeout = 5000; // 5s pour détecter un player figé
+    this.isHapticAborted = false; // Flag d'abandon définitif
     
     // Event listener cleanup
-    this.managersListener = null;
+    this.coreListener = null;
   }
+
+  // ============================================================================
+  // LIFECYCLE
+  // ============================================================================
 
   componentDidMount() {
     this.applyTheme();
     this.initializeComponent();
   }
 
+  // ✅ Dans FunPlayer.jsx
   componentDidUpdate(prevProps) {
     if (prevProps.theme !== this.props.theme) {
       this.applyTheme();
     }
     
-    // ✅ SYNCHRONISATION EXPLICITE: Seulement si la référence change
-    if (prevProps.playlist !== this.props.playlist) {
-      this.synchronizePlaylistWithManager();
-    }
-  }
-
-  synchronizePlaylistWithManager = async () => {
-    const { playlist } = this.props;
+    // ✅ Test de référence simple et ultra-performant
+    if (prevProps.playlist === this.props.playlist) return;
     
-    console.log('🎮 FunPlayer: Synchronizing playlist with manager:', playlist?.length || 0, 'items');
-    
-    if (!playlist || playlist.length === 0) {
-      managers.playlist.reset();
-      this.setStatus('No playlist loaded');
-      return;
-    }
-
-    // ✅ SIMPLE: Juste synchroniser, une fois
-    try {
-      await managers.playlist.loadPlaylist(playlist);
-      // Les événements géreront le reste
-    } catch (error) {
-      console.error('FunPlayer: Failed to sync playlist:', error);
-      this.setError('Failed to sync playlist', error);
-    }
+    // ✅ Si on arrive ici, le contenu a vraiment changé
+    this.handlePlaylistUpdate();
   }
 
   componentWillUnmount() {
     this.stopHapticLoop();
-    if (this.managersListener) {
-      this.managersListener();
+    
+    // ✅ NOUVEAU: Cleanup timeout stall
+    if (this.stallTimeoutId) {
+      clearTimeout(this.stallTimeoutId);
+      this.stallTimeoutId = null;
+    }
+    
+    if (this.coreListener) {
+      this.coreListener();
     }
   }
 
+  initializeComponent = () => {
+    try {
+      core.notify?.('status:funplayer', { message: 'Initializing FunPlayer component...', type: 'processing' });
+      
+      this.coreListener = core.addListener(this.handleEvent);
+      
+      if (this.props.playlist) {
+        this.handlePlaylistUpdate();
+      }
+      
+      core.notify?.('status:funplayer', { message: 'FunPlayer component initialized', type: 'success' });
+      
+    } catch (error) {
+      core.notify?.('status:funplayer', { message: 'FunPlayer initialization failed', type: 'error', error: error.message });
+    }
+  }
+
+  handlePlaylistUpdate = async () => {
+    const { playlist } = this.props;
+    
+    core.notify?.('status:funplayer', { message: `Synchronizing playlist: ${playlist?.length || 0} items`, type: 'log' });
+    
+    await core.playlist.loadPlaylist(playlist);
+  }
+
   // ============================================================================
-  // ✅ MODIFIÉ: GESTION D'ÉVÉNEMENTS ÉTENDUE
+  // THEME
   // ============================================================================
 
-  handleManagerEvent = (event, data) => {
+  applyTheme = () => {
+    const { theme } = this.props;
+    if (!theme) return;
+
+    const element = document.querySelector('.fun-player') || 
+                   document.documentElement;
+
+    Object.entries(theme).forEach(([key, value]) => {
+      const cssVar = this.convertToCssVar(key);
+      element.style.setProperty(cssVar, value);
+    });
+
+    if (theme.base) {
+      element.setAttribute('data-theme', theme.base);
+    }
+
+    core.notify?.('status:funplayer', { message: 'Theme applied successfully', type: 'log' });
+  }
+
+  convertToCssVar = (key) => {
+    const mappings = {
+      'primaryColor': '--primary-color',
+      'backgroundColor': '--background-color',
+      'secondaryBackgroundColor': '--secondary-background-color', 
+      'textColor': '--text-color',
+      'borderColor': '--border-color',
+      'fontFamily': '--font-family',
+      'baseRadius': '--base-radius',
+      'spacing': '--spacing'
+    };
+    
+    return mappings[key] || `--${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+  }
+
+  // ============================================================================
+  // GESTION D'ÉVÉNEMENTS
+  // ============================================================================
+
+  handleEvent = (event, data) => {
     switch (event) {
-      case 'buttplug:connection':
-        this.setStatus(data.connected ? 'Connected to Intiface' : 'Disconnected from Intiface');
+      case 'core:ready':
+        core.notify('status:funplayer',{message:'Core systems ready', type:'success'});
         this._triggerRender();
-        break;
-        
-      case 'buttplug:device':
-        this.setStatus(data.device ? `Device selected: ${data.device.name}` : 'No device selected');
-        this._triggerRender();
-        break;
-        
-      case 'buttplug:error':
-        this.setError('Device error', data.error);
-        break;
-        
-      // ✅ Événements funscript
-      case 'funscript:load':
-        this.setStatus(`Funscript loaded: ${data.channels.length} channels, ${data.duration.toFixed(2)}s`);
-        this._triggerRender();
-        break;
-        
-      case 'funscript:channels':
-        this._triggerRender(); // Re-render pour mettre à jour les UI qui dépendent des canaux
-        break;
-        
-      case 'funscript:options':
-      case 'funscript:globalOffset':
-        // Pas besoin de re-render complet, juste noter dans les logs
-        break;
-
-      // ✅ Événements playlist
-      case 'playlist:loaded':
-        this.setStatus(`Playlist loaded: ${data.totalItems} items`);
-        this.setState({ isReady: false }); // Prêt pour sélection d'item
-        this._triggerRender();
-        break;
-        
-      case 'playlist:itemChanged':
-        this.setStatus(`Playing item ${data.index + 1}: ${data.item?.name || 'Untitled'}`);
-        this.setState({ isReady: false }); // Pas encore prêt, attendre loadFunscript
-        this._triggerRender();
-        
-        // ✅ Charger le funscript de l'item sélectionné
-        this._loadItemFunscript(data.item);
         break;
         
       case 'playlist:playbackChanged':
-        // Synchroniser l'état de lecture local
         this.setState({ isPlaying: data.isPlaying });
         break;
-        
-      case 'playlist:error':
-        this.setError('Playlist error', data.error);
-        break;
-        
-      // ✅ Événements combinés
-      case 'managers:autoConnect':
-        if (data.success) {
-          this.setStatus(`Auto-connected to ${data.device.name} (${data.mapResult.mapped}/${data.mapResult.total} channels mapped)`);
-        } else {
-          this.setError('Auto-connect failed', data.error);
+
+      // ✅ AJOUT: Synchroniser MediaPlayer quand PlaylistManager change d'item
+      case 'playlist:itemChanged':
+        if (this.mediaPlayerRef.current && data.index >= 0) {
+          // Vérifier si MediaPlayer n'est pas déjà sur le bon item
+          const currentMediaPlayerIndex = this.mediaPlayerRef.current.getPlaylistInfo().currentIndex;
+          
+          if (currentMediaPlayerIndex !== data.index) {
+            core.notify?.('status:funplayer', { 
+              message: `Syncing MediaPlayer: ${currentMediaPlayerIndex} → ${data.index}`, 
+              type: 'log' 
+            });
+            
+            this.mediaPlayerRef.current.goToPlaylistItem(data.index);
+          }
         }
-        this._triggerRender();
-        break;
-        
-      case 'managers:autoMap':
-        this.setStatus(`Auto-mapped ${data.result.mapped}/${data.result.total} channels to ${data.mode} actuators`);
         break;
     }
   }
 
-  // ✅ Helper pour trigger re-render
   _triggerRender = () => {
     this.setState(prevState => ({ 
       renderTrigger: prevState.renderTrigger + 1 
@@ -165,262 +183,111 @@ class FunPlayer extends Component {
   }
 
   // ============================================================================
-  // INITIALIZATION - ✅ MODIFIÉ: API Managers unifiée
+  // MEDIA PLAYER CALLBACKS
   // ============================================================================
 
-  initializeComponent = () => {
-    try {
-      // Écouter les événements des managers
-      this.managersListener = managers.addListener(this.handleManagerEvent);
-      
-      this.setStatus('Component initialized');
-      
-      // Traitement initial de la playlist
-      if (this.props.playlist) {
-        this.handlePlaylistUpdate();
-      }
-      
-    } catch (error) {
-      console.error('FunPlayer: Initialization error:', error);
-      this.setError('Failed to initialize', error);
-    }
-  }
-
-  // ============================================================================
-  // PLAYLIST MANAGEMENT - ✅ MODIFIÉ: API Managers unifiée
-  // ============================================================================
-
-  handlePlaylistUpdate = async () => {
-    const { playlist } = this.props;
-    
-    console.log('🎮 FunPlayer.handlePlaylistUpdate called with:', playlist?.length, 'items');
-    
-    if (!playlist || playlist.length === 0) {
-      managers.playlist.reset();
-      this.setStatus('No playlist loaded');
-      this.setState({ isReady: true });
-      return;
-    }
-
-    this.setStatus(`Processing playlist...`);
-
-    try {
-      console.log('🎮 Calling PlaylistManager.loadPlaylist...');
-      await managers.playlist.loadPlaylist(playlist);
-      console.log('🎮 PlaylistManager loaded, items:', managers.playlist.getItems().length);
-      
-    } catch (error) {
-      console.error('FunPlayer: Failed to process playlist:', error);
-      this.setError('Failed to process playlist', error);
-    }
-  }
-
-  // ✅ Charge le funscript d'un item (appelé depuis handleManagerEvent)
-  _loadItemFunscript = async (item) => {
-    if (!item) {
-      this.setState({ isReady: true });
-      return;
-    }
-
-    this.stopHapticLoop();
-    
-    // ✅ MODIFIÉ: API Managers unifiée
-    if (managers.buttplug) {
-      try {
-        await managers.buttplug.stopAll();
-      } catch (error) {
-        console.warn('Failed to stop devices:', error);
-      }
-    }
-
-    try {
-      if (item.funscript) {
-        if (typeof item.funscript === 'object') {
-          await this.loadFunscriptData(item.funscript);
-        } else {
-          await this.loadFunscript(item.funscript);
-        }
-      } else {
-        // Reset funscript si pas de haptic
-        managers.funscript.reset();
-      }
-
-      this.setState({ isReady: true });
-      this.setStatus(`Ready: ${item.name || item.title || 'Untitled'}`);
-
-    } catch (error) {
-      this.setError(`Failed to load funscript for item`, error);
-    }
-  }
-
-  // ============================================================================
-  // FUNSCRIPT LOADING - ✅ MODIFIÉ: API Managers unifiée
-  // ============================================================================
-
-  loadFunscript = async (src) => {
-    try {
-      let data;
-      if (typeof src === 'string') {
-        if (src.startsWith('http') || src.startsWith('/')) {
-          // ✅ Fetch avec fallback proxy CORS
-          data = await this._fetchFunscriptWithFallback(src);
-        } else {
-          data = JSON.parse(src);
-        }
-      } else {
-        data = src;
-      }
-      
-      managers.funscript.load(data);
-      const mapResult = managers.autoMapChannels();
-      console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels`);
-      
-    } catch (error) {
-      console.error('Failed to load funscript:', error);
-      throw error;
-    }
-  }
-
-  // ✅ Fetch avec fallback proxy
-  _fetchFunscriptWithFallback = async (url) => {
-    try {
-      // 1. Essai direct d'abord (plus rapide)
-      console.log('🔄 Loading funscript directly from:', url);
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      return await response.json();
-      
-    } catch (directError) {
-      console.warn('❌ Direct fetch failed, trying CORS proxy...', directError.message);
-      
-      try {
-        // 2. Fallback proxy CORS
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-        console.log('🔄 Loading funscript via proxy:', proxyUrl);
-        const response = await fetch(proxyUrl);
-        if (!response.ok) {
-          throw new Error(`Proxy HTTP ${response.status}: ${response.statusText}`);
-        }
-        return await response.json();
-        
-      } catch (proxyError) {
-        throw new Error(`Both direct and proxy loading failed. Direct: ${directError.message}, Proxy: ${proxyError.message}`);
-      }
-    }
-  }
-
-  loadFunscriptData = async (data) => {
-    try {
-      // ✅ MODIFIÉ: API Managers unifiée
-      managers.funscript.load(data);
-      
-      const mapResult = managers.autoMapChannels();
-      console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels`);
-      
-    } catch (error) {
-      console.error('Failed to load funscript data:', error);
-      throw error;
-    }
-  }
-
-  // ============================================================================
-  // MEDIA PLAYER EVENTS - ✅ MODIFIÉ: API Managers unifiée
-  // ============================================================================
-
-  handleMediaLoadEnd = (data) => {
-    console.log('Media loaded:', data);
-    
-    const currentItem = managers.playlist.getCurrentItem();
-    if (currentItem && Math.abs((currentItem.duration || 0) - data.duration) > 1) {
-      console.log(`Correcting duration: ${currentItem.duration}s → ${data.duration}s`);
-      managers.playlist.updateCurrentItemDuration(data.duration);
-    }
-    
-    this.setState({ isReady: true }, () => {
-      this.setStatus(`Media ready (${data.duration?.toFixed(1)}s)`);
-      this.triggerResize();
-    });
-  }
-
-  handleMediaError = (error) => {
-    console.error('Media error:', error);
-    this.setError('Media loading failed', error);
-  }
-
-  handleMediaPlay = () => {
-    this.hapticTime = this.mediaPlayerRef.current?.getTime() || 0;
+  // Groupe 1: Callbacks haptiques (timing critique)
+  handleMediaPlay = ({ currentTime }) => {
+    // Timing technique haptique
+    this.hapticTime = currentTime || 0;
     this.lastMediaTime = this.hapticTime;
     this.lastSyncTime = performance.now();
     
-    const currentTime = this.mediaPlayerRef.current?.getTime() || 0;
     const duration = this.mediaPlayerRef.current?.getDuration() || 0;
     
-    // ✅ MODIFIÉ: API Managers unifiée
-    managers.playlist.updatePlaybackState(true, currentTime, duration);
+    core.playlist.updatePlaybackState(true, currentTime, duration);
     
-    if (this.hasFunscript()) {
+    // Démarrage boucle haptique
+    if (core.funscript.hasFunscript()) {
       this.startHapticLoop();
-      this.setStatus('Playing with haptics');
-    } else {
-      this.setStatus('Playing media');
+      core.notify?.('status:funplayer', { message: `Haptic playback started at ${currentTime.toFixed(1)}s`, type: 'log' });
     }
   }
 
-  handleMediaPause = async () => {
-    if (this.hasFunscript()) {
+  handleMediaPause = async ({ currentTime }) => {
+    // Arrêt boucle haptique
+    if (core.funscript.hasFunscript()) {
       this.stopHapticLoop();
-      // ✅ MODIFIÉ: API Managers unifiée
-      if (managers.buttplug) {
-        try {
-          await managers.buttplug.stopAll();
-        } catch (error) {
-          console.warn('Failed to stop devices:', error);
-        }
+      try {
+        await core.buttplug.stopAll();
+        core.notify?.('status:funplayer', { message: 'Haptic devices stopped', type: 'log' });
+      } catch (error) {
+        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
       }
     }
     
-    const currentTime = this.mediaPlayerRef.current?.getTime() || 0;
     const duration = this.mediaPlayerRef.current?.getDuration() || 0;
-    
-    // ✅ MODIFIÉ: API Managers unifiée
-    managers.playlist.updatePlaybackState(false, currentTime, duration);
+    core.playlist.updatePlaybackState(false, currentTime, duration);
     
     this.setState({ currentActuatorData: new Map() });
-    this.setStatus('Paused');
   }
 
-  handleMediaEnd = async () => {
-    if (this.hasFunscript()) {
+  handleMediaEnd = async ({ currentTime }) => {
+    // Arrêt boucle haptique
+    if (core.funscript.hasFunscript()) {
       this.stopHapticLoop();
-      // ✅ MODIFIÉ: API Managers unifiée
-      if (managers.buttplug) {
-        try {
-          await managers.buttplug.stopAll();
-        } catch (error) {
-          console.warn('Failed to stop devices:', error);
-        }
+      try {
+        await core.buttplug.stopAll();
+        core.notify?.('status:funplayer', { message: 'Haptic playback ended', type: 'log' });
+      } catch (error) {
+        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices on end', type: 'log', error: error.message });
       }
     }
     
-    // ✅ MODIFIÉ: API Managers unifiée
-    managers.playlist.updatePlaybackState(false, 0, 0);
+    core.playlist.updatePlaybackState(false, 0, 0);
     
     this.hapticTime = 0;
     this.lastMediaTime = 0;
     this.setState({ currentActuatorData: new Map() });
-    this.setStatus('Item ended');
   }
 
+  // ✅ MODIFIÉ: Buffering officiel = patience infinie
+  handleMediaWaiting = ({ currentTime }) => {
+    if (this.isBuffering && this.bufferingSource === 'waiting') {
+      // Déjà en buffering officiel
+      return;
+    }
+    
+    // Arrêter tout timeout de stall en cours (priorité au buffering officiel)
+    if (this.stallTimeoutId) {
+      clearTimeout(this.stallTimeoutId);
+      this.stallTimeoutId = null;
+    }
+    
+    this._startBuffering('waiting', currentTime);
+  }
+
+  // ✅ MODIFIÉ: Sortie de buffering = reset état d'abandon
+  handleMediaCanPlay = ({ currentTime }) => {
+    if (this.isBuffering) {
+      this._endBuffering('canplay', currentTime);
+    }
+  }
+
+  // ✅ MODIFIÉ: Détection stall conservatrice avec timeout d'abandon
   handleMediaTimeUpdate = ({ currentTime }) => {
-    if (!this.hasFunscript() || !this.hapticIntervalId) {
+    // Si haptique déjà abandonné, ne plus rien faire
+    if (this.isHapticAborted) {
+      return;
+    }
+    
+    // Synchronisation timing haptique (technique pur)
+    if (!core.funscript.hasFunscript() || !this.hapticIntervalId) {
       return;
     }
     
     const now = performance.now();
     const timeSinceLastSync = (now - this.lastSyncTime) / 1000;
+    const mediaTimeDelta = currentTime - this.lastMediaTime;
     
+    // ✅ Détection stall : 1s+ sans progression ET pas de buffering officiel
+    if (timeSinceLastSync > 1.0 && Math.abs(mediaTimeDelta) < 0.01 && !this.isBuffering) {
+      core.notify?.('status:funplayer', { message: 'Player stall detected (1s+ frozen), starting timeout', type: 'error' });
+      this._startBuffering('stall_detection', currentTime);
+      return;
+    }
+    
+    // Synchronisation normale
     const drift = Math.abs(currentTime - this.hapticTime);
     const shouldResync = drift > 0.05 || timeSinceLastSync > 1.0;
     
@@ -430,190 +297,207 @@ class FunPlayer extends Component {
       this.lastSyncTime = now;
       
       if (drift > 0.1) {
-        console.warn(`Haptic drift detected: ${(drift * 1000).toFixed(1)}ms, resyncing`);
+        core.notify?.('status:funplayer', { message: `Haptic drift detected: ${(drift * 1000).toFixed(1)}ms, resyncing`, type: 'log' });
       }
     }
+  }
 
-    // ✅ MODIFIÉ: API Managers unifiée - Synchronisation périodique (throttled)
-    //const duration = this.mediaPlayerRef.current?.getDuration() || 0;
-    //managers.playlist.updatePlaybackState(true, currentTime, duration);
+  handleMediaSeek = ({ currentTime }) => {
+    // Sync haptique après seek
+    if (core.funscript.hasFunscript() && this.hapticIntervalId) {
+      this.hapticTime = currentTime;
+      this.lastMediaTime = currentTime;
+      this.lastSyncTime = performance.now();
+      core.notify?.('status:funplayer', { message: `Haptic synced to ${currentTime.toFixed(1)}s after seek`, type: 'log' });
+    }
+  }
+
+  // Groupe 2: Callbacks métier
+  handleMediaLoadEnd = (data) => {
+    core.notify?.('status:funplayer', { message: `Media loaded: ${data.duration.toFixed(1)}s`, type: 'log' });
+    
+    const currentItem = core.playlist.getCurrentItem();
+    if (currentItem && Math.abs((currentItem.duration || 0) - data.duration) > 1) {
+      core.notify?.('status:funplayer', { message: `Duration corrected: ${currentItem.duration?.toFixed(1) || 'unknown'}s → ${data.duration.toFixed(1)}s`, type: 'log' });
+      core.playlist.updateCurrentItemDuration(data.duration);
+    }
+    
+    this.triggerResize();
+  }
+
+  handleMediaError = (error) => {
+    core.notify?.('status:funplayer', { message: 'Media loading failed', type: 'error', error: error.message });
+    core.setError('Media loading failed', error);
+  }
+
+  // Groupe 3: Navigation playlist
+  handlePlaylistItemChange = (newVideoJsIndex) => {
+    core.notify?.('status:funplayer', { message: `MediaPlayer switched to item ${newVideoJsIndex}`, type: 'log' });
+    
+    if (newVideoJsIndex >= 0) {
+      const currentPlaylistIndex = core.playlist.getCurrentIndex();
+      
+      if (newVideoJsIndex !== currentPlaylistIndex) {
+        core.notify?.('status:funplayer', { message: `Syncing core playlist to Video.js index ${newVideoJsIndex}`, type: 'log' });
+        core.playlist.goTo(newVideoJsIndex);
+      }
+    }
   }
 
   // ============================================================================
-  // HAPTIC LOOP - ✅ MODIFIÉ: API Managers unifiée
+  // ✅ NOUVEAU: Logique buffering intelligente selon source
+  // ============================================================================
+
+  _startBuffering = (source, currentTime) => {
+    if (this.isBuffering && this.bufferingSource === 'waiting') {
+      // Priorité absolue au buffering officiel
+      return;
+    }
+    
+    this.isBuffering = true;
+    this.bufferingSource = source;
+    this.bufferingStartTime = performance.now();
+    
+    // Suspendre la boucle haptique
+    if (this.hapticIntervalId) {
+      this.stopHapticLoop();
+      try {
+        core.buttplug.stopAll();
+        core.notify?.('status:funplayer', { message: `Buffering suspended (${source})`, type: 'log' });
+      } catch (error) {
+        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
+      }
+    }
+    
+    this.setState({ currentActuatorData: new Map() });
+    
+    // ✅ NOUVEAU: Timeout UNIQUEMENT pour stall detection
+    if (source === 'stall_detection') {
+      this.stallTimeoutId = setTimeout(() => {
+        this._abortHapticPlayback();
+      }, this.stallTimeout);
+      
+      core.notify?.('status:funplayer', { message: `Player stall timeout started (${this.stallTimeout}ms)`, type: 'error' });
+    }
+    // Pour 'waiting' : pas de timeout, patience infinie
+  }
+
+  _endBuffering = (trigger, currentTime) => {
+    if (!this.isBuffering) return;
+    
+    const bufferingDuration = performance.now() - this.bufferingStartTime;
+    const wasStallDetection = this.bufferingSource === 'stall_detection';
+    
+    // Clear timeout si stall detection
+    if (this.stallTimeoutId) {
+      clearTimeout(this.stallTimeoutId);
+      this.stallTimeoutId = null;
+    }
+    
+    // Reset état buffering
+    this.isBuffering = false;
+    this.bufferingSource = null;
+    
+    // ✅ NOUVEAU: Reset abandon si le player s'est remis
+    if (this.isHapticAborted && trigger === 'canplay') {
+      this.isHapticAborted = false;
+      core.notify?.('status:funplayer', { message: 'Player recovered, haptic playback re-enabled', type: 'success' });
+    }
+    
+    // Reprendre si conditions OK
+    const mediaPlayer = this.mediaPlayerRef.current;
+    if (mediaPlayer && mediaPlayer.isPlaying() && core.funscript.hasFunscript() && !this.isHapticAborted) {
+      // Re-synchroniser proprement
+      this.hapticTime = currentTime || mediaPlayer.getTime();
+      this.lastMediaTime = this.hapticTime;
+      this.lastSyncTime = performance.now();
+      
+      this.startHapticLoop();
+      
+      const sourceInfo = wasStallDetection ? ' (stall recovered)' : '';
+      core.notify?.('status:funplayer', { message: `Buffering ended via ${trigger} (${bufferingDuration.toFixed(0)}ms)${sourceInfo}, haptic resumed`, type: 'success' });
+    }
+  }
+
+  // ✅ NOUVEAU: Abandon définitif en cas de player figé
+  _abortHapticPlayback = () => {
+    const bufferingDuration = performance.now() - this.bufferingStartTime;
+    
+    // Clear timeout
+    if (this.stallTimeoutId) {
+      clearTimeout(this.stallTimeoutId);
+      this.stallTimeoutId = null;
+    }
+    
+    // Marquer comme abandonné
+    this.isHapticAborted = true;
+    this.isBuffering = false;
+    this.bufferingSource = null;
+    
+    // Arrêt définitif de la boucle haptique
+    this.stopHapticLoop();
+    try {
+      core.buttplug.stopAll();
+    } catch (error) {
+      // Silent fail
+    }
+    
+    // ✅ Tentative de réveil du player
+    const mediaPlayer = this.mediaPlayerRef.current;
+    if (mediaPlayer) {
+      try {
+        mediaPlayer.pause();
+        core.notify?.('status:funplayer', { message: 'Sent pause command to unresponsive player', type: 'log' });
+      } catch (error) {
+        core.notify?.('status:funplayer', { message: 'Failed to send pause to player', type: 'log', error: error.message });
+      }
+    }
+    
+    this.setState({ currentActuatorData: new Map() });
+    
+    // Status d'erreur final
+    core.notify?.('status:funplayer', { 
+      message: `Media playing aborted due to unresponsive player (${bufferingDuration.toFixed(0)}ms stall)`, 
+      type: 'error' 
+    });
+  }
+
+  // ============================================================================
+  // HAPTIC LOOP
   // ============================================================================
 
   processHapticFrame = async (timeDelta) => {
     const mediaPlayer = this.mediaPlayerRef.current;
     
-    // ✅ MODIFIÉ: API Managers unifiée
-    if (!mediaPlayer || !managers.funscript) return;
+    if (!mediaPlayer) return;
     
+    // ✅ NOUVEAU: Ne pas traiter si abandonné ou buffering
+    if (this.isHapticAborted || this.isBuffering) {
+      return;
+    }
+    
+    // Calculs de timing spécifiques à FunPlayer
     this.hapticTime += timeDelta;
     const currentTime = this.hapticTime;
     
     const mediaRefreshRate = this.getMediaRefreshRate(mediaPlayer);
     const adjustedDuration = this.calculateLinearDuration(timeDelta, mediaRefreshRate);
     
-    const actuatorCommands = managers.funscript.interpolateToActuators(currentTime);
-    const visualizerData = new Map();
-    
-    for (const [actuatorIndex, value] of Object.entries(actuatorCommands)) {
-      const index = parseInt(actuatorIndex);
-      
-      let actuatorType = 'linear';
-      
-      // ✅ MODIFIÉ: API Managers unifiée
-      if (managers.buttplug && managers.buttplug.getSelected()) {
-        actuatorType = managers.buttplug.getActuatorType(index) || 'linear';
-        await this.sendHapticCommand(actuatorType, value, adjustedDuration * 1000, index);
-      }
-      
-      visualizerData.set(index, {
-        value: value,
-        type: actuatorType
-      });
-    }
+    // Orchestration haptique via core
+    const visualizerData = await core.processHapticFrame(currentTime, { 
+      duration: adjustedDuration * 1000 
+    });
     
     this.setState({ currentActuatorData: visualizerData });
   }
-
-  sendHapticCommand = async (type, value, duration, actuatorIndex) => {
-    // ✅ MODIFIÉ: API Managers unifiée
-    if (!managers.buttplug || !managers.buttplug.isConnected) return;
-
-    try {
-      switch (type) {
-        case 'vibrate':
-          await managers.buttplug.vibrate(value, actuatorIndex);
-          break;
-        case 'oscillate':
-          await managers.buttplug.oscillate(value, actuatorIndex);
-          break;
-        case 'linear':
-          await managers.buttplug.linear(value, duration, actuatorIndex);
-          break;
-        case 'rotate':
-          await managers.buttplug.rotate(value, actuatorIndex);
-          break;
-        default:
-          console.warn(`Unknown haptic command type: ${type}`);
-          break;
-      }
-    } catch (error) {
-      // Silent fail pour les commandes haptiques (évite spam console)
-    }
-  }
-
-  // ============================================================================
-  // UTILITY METHODS - ✅ MODIFIÉ: API Managers unifiée
-  // ============================================================================
-
-  hasFunscript = () => {
-    return managers.funscript && managers.funscript.getChannels().length > 0;
-  }
-
-  handleHapticSettingsChange = (channel, action, data) => {
-    switch (action) {
-      case 'autoMap':
-        this.setStatus(`Auto-mapped ${data.mapped}/${data.total} channels to ${data.mode}`);
-        break;
-      case 'globalOffset':
-        this.setStatus(`Global offset set to ${data}s`);
-        break;
-      case 'setOptions':
-        if (channel) {
-          this.setStatus(`Updated ${channel} settings`);
-        }
-        break;
-      default:
-        if (channel && action) {
-          this.setStatus(`Updated ${channel}: ${action}`);
-        }
-    }
-  }
-
-  // ============================================================================
-  // RENDER METHODS - ✅ MODIFIÉ: API Managers unifiée
-  // ============================================================================
-
-  renderDebugInfo() {
-    if (!this.state.showDebug) return null;
-    
-    // ✅ MODIFIÉ: API Managers unifiée
-    const funscriptInfo = managers.funscript?.getDebugInfo() || { loaded: false };
-    const buttplugStatus = managers.buttplug?.getStatus() || { isConnected: false };
-    const playlistInfo = managers.playlist.getPlaylistInfo();
-    const { updateRate, currentActuatorData } = this.state;
-    
-    const safeActuatorData = currentActuatorData || new Map();
-    
-    return (
-      <div className="fp-block fp-block-standalone debug-info">
-        <div className="fp-section debug-content">
-          
-          {/* ✅ MODIFIÉ: API Managers unifiée */}
-          {playlistInfo.totalItems > 0 && (
-            <div className="playlist-info fp-mb-sm">
-              <h4 className="fp-title">Playlist:</h4>
-              <p>Items: {playlistInfo.totalItems}</p>
-              <p>Current: {playlistInfo.currentIndex + 1}</p>
-              {playlistInfo.currentIndex >= 0 && (
-                <p>Title: {managers.playlist.getCurrentItem()?.name || 'Untitled'}</p>
-              )}
-              <p>Playing: {playlistInfo.isPlaying ? 'Yes' : 'No'}</p>
-              <p>Time: {playlistInfo.currentTime.toFixed(1)}s / {playlistInfo.duration.toFixed(1)}s</p>
-            </div>
-          )}
-          
-          {this.hasFunscript() && (
-            <div className="performance-info fp-mb-sm">
-              <h4 className="fp-title">Performance:</h4>
-              <p>Update Rate: {updateRate}Hz</p>
-              <p>Frame Time: {(1000/updateRate).toFixed(1)}ms</p>
-              <p>Active Actuators: {safeActuatorData.size}</p>
-            </div>
-          )}
-          
-          <div className="funscript-info fp-mb-sm">
-            <h4 className="fp-title">Funscript:</h4>
-            {funscriptInfo && funscriptInfo.loaded ? (
-              <>
-                <p>Channels: {funscriptInfo.channels ? Object.keys(funscriptInfo.channels).length : 0}</p>
-                <p>Duration: {typeof funscriptInfo.duration === 'number' ? funscriptInfo.duration.toFixed(2) : 0}s</p>
-                {funscriptInfo.globalOffset !== undefined && (
-                  <p>Global Offset: {funscriptInfo.globalOffset.toFixed(3)}s</p>
-                )}
-              </>
-            ) : (
-              <p>❌ No funscript loaded</p>
-            )}
-          </div>
-          
-          {this.hasFunscript() && buttplugStatus && (
-            <div className="device-info fp-mb-sm">
-              <h4 className="fp-title">Device:</h4>
-              <p>Connected: {buttplugStatus.isConnected ? 'Yes' : 'No'}</p>
-              <p>Device Count: {buttplugStatus.deviceCount || 0}</p>
-              {buttplugStatus.selectedDevice && (
-                <p>Selected: {buttplugStatus.selectedDevice.name}</p>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // AUTRES MÉTHODES INCHANGÉES
-  // ============================================================================
 
   startHapticLoop = () => {
     if (this.hapticIntervalId) return;
     
     this.expectedHapticTime = performance.now();
     const targetInterval = 1000 / this.state.updateRate;
+    
+    core.notify?.('status:funplayer', { message: `Starting haptic loop at ${this.state.updateRate}Hz`, type: 'log' });
     
     const optimizedLoop = () => {
       try {
@@ -635,7 +519,7 @@ class FunPlayer extends Component {
         }
         
       } catch (error) {
-        console.error('Haptic loop error:', error);
+        core.notify?.('status:funplayer', { message: 'Haptic loop error', type: 'error', error: error.message });
         this.hapticIntervalId = setTimeout(optimizedLoop, targetInterval);
       }
     };
@@ -647,6 +531,7 @@ class FunPlayer extends Component {
     if (this.hapticIntervalId) {
       clearTimeout(this.hapticIntervalId);
       this.hapticIntervalId = null;
+      core.notify?.('status:funplayer', { message: 'Haptic loop stopped', type: 'log' });
     }
     this.expectedHapticTime = 0;
     this.lastSyncTime = 0;
@@ -655,10 +540,15 @@ class FunPlayer extends Component {
   restartWithNewRate = () => {
     const wasPlaying = this.hapticIntervalId !== null;
     if (wasPlaying) {
+      core.notify?.('status:funplayer', { message: `Restarting haptic loop with new rate: ${this.state.updateRate}Hz`, type: 'log' });
       this.stopHapticLoop();
       this.startHapticLoop();
     }
   }
+
+  // ============================================================================
+  // UTILITY METHODS
+  // ============================================================================
 
   getMediaRefreshRate = (mediaPlayer) => {
     const state = mediaPlayer.getState();
@@ -688,64 +578,47 @@ class FunPlayer extends Component {
   getUpdateRate = () => this.state.updateRate
 
   handleUpdateRateChange = (newRate) => {
+    core.notify?.('status:funplayer', { message: `Update rate changed: ${this.state.updateRate}Hz → ${newRate}Hz`, type: 'log' });
     this.setState({ updateRate: newRate });
-    this.setStatus(`Update rate changed to ${newRate}Hz`);
   }
+
+  // ============================================================================
+  // UI CALLBACKS
+  // ============================================================================
 
   triggerResize = () => this.props.onResize?.()
 
   handleToggleVisualizer = () => {
-    this.setState({ showVisualizer: !this.state.showVisualizer }, () => {
+    const newState = !this.state.showVisualizer;
+    core.notify?.('status:funplayer', { message: `Visualizer ${newState ? 'shown' : 'hidden'}`, type: 'log' });
+    this.setState({ showVisualizer: newState }, () => {
       this.triggerResize();
     });
   }
 
   handleToggleDebug = () => {
-    this.setState({ showDebug: !this.state.showDebug }, () => {
+    const newState = !this.state.showDebug;
+    core.notify?.('status:funplayer', { message: `Debug panel ${newState ? 'shown' : 'hidden'}`, type: 'log' });
+    this.setState({ showDebug: newState }, () => {
       this.triggerResize();
     });
   }
 
-  setStatus = (message) => this.setState({ status: message, error: null })
-  
-  setError = (message, error = null) => {
-    console.error(message, error);
-    this.setState({ 
-      status: message, 
-      error: error?.message || String(error) || null 
-    });
-  }
+  // ============================================================================
+  // RENDER METHODS
+  // ============================================================================
 
-  applyTheme = () => {
-    const { theme } = this.props;
-    if (!theme) return;
-
-    const element = document.querySelector('.fun-player') || 
-                   document.documentElement;
-
-    Object.entries(theme).forEach(([key, value]) => {
-      const cssVar = this.convertToCssVar(key);
-      element.style.setProperty(cssVar, value);
-    });
-
-    if (theme.base) {
-      element.setAttribute('data-theme', theme.base);
+  renderDebugInfo = () => {
+    // Afficher seulement si showDebug est activé ET enableConsoleLogging
+    if (!this.state.showDebug) {
+      return null;
     }
-  }
 
-  convertToCssVar = (key) => {
-    const mappings = {
-      'primaryColor': '--primary-color',
-      'backgroundColor': '--background-color',
-      'secondaryBackgroundColor': '--secondary-background-color', 
-      'textColor': '--text-color',
-      'borderColor': '--border-color',
-      'fontFamily': '--font-family',
-      'baseRadius': '--base-radius',
-      'spacing': '--spacing'
-    };
-    
-    return mappings[key] || `--${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+    return (
+      <LoggingComponent 
+        onResize={this.triggerResize}
+      />
+    );
   }
 
   renderHapticSettings() {
@@ -754,8 +627,6 @@ class FunPlayer extends Component {
         <HapticSettingsComponent 
           onUpdateRateChange={this.handleUpdateRateChange}
           onGetUpdateRate={this.getUpdateRate}
-          onSettingsChange={this.handleHapticSettingsChange}
-          onStatusChange={this.setStatus}
           onResize={this.triggerResize}
         />
       </div>
@@ -763,19 +634,34 @@ class FunPlayer extends Component {
   }
 
   renderMediaPlayer() {
-    // ✅ MODIFIÉ: API Managers unifiée
-    const playlistItems = managers.playlist.getItems();
+    const playlistItems = core.playlist.items;
     
     return (
       <div className="fp-block fp-block-middle media-section">
         <MediaPlayer
           ref={this.mediaPlayerRef}
+          
+          /* Props pour MediaPlayer autonome */
+          playlist={playlistItems}
+          notify={core.notify}
+          
+          /* Callbacks haptiques (timing critique) */
           onPlay={this.handleMediaPlay}
           onPause={this.handleMediaPause}
           onEnd={this.handleMediaEnd}
           onTimeUpdate={this.handleMediaTimeUpdate}
+          onSeek={this.handleMediaSeek}
+          
+          /* ✅ NOUVEAU: Callbacks buffering */
+          onWaiting={this.handleMediaWaiting}
+          onCanPlay={this.handleMediaCanPlay}
+          
+          /* Callbacks métier */
           onLoadEnd={this.handleMediaLoadEnd}
           onError={this.handleMediaError}
+          
+          /* Navigation playlist */
+          onPlaylistItemChange={this.handlePlaylistItemChange}
         />
       </div>
     );
@@ -798,20 +684,20 @@ class FunPlayer extends Component {
   }
 
   renderStatusBar() {
-    const { status, error, isReady, showVisualizer, showDebug } = this.state;
+    const { showVisualizer, showDebug } = this.state;
     
-    // ✅ MODIFIÉ: API Managers unifiée
-    const playlistInfo = managers.playlist.getPlaylistInfo();
+    const coreStatus = core.getStatus();
+    const playlistInfo = core.playlist.getPlaylistInfo();
     
     return (
       <div className="fp-block fp-block-last status-bar-section">
         <div className="fp-section-compact fp-layout-horizontal">
           <div className="fp-layout-row">
-            <span className={`fp-status-dot ${isReady ? 'ready' : 'loading'}`}>
-              {isReady ? '✅' : '⏳'}
+            <span className={`fp-status-dot ${coreStatus.isReady ? 'ready' : 'loading'}`}>
+              {coreStatus.isReady ? '✅' : '⏳'}
             </span>
             <span className="fp-label">
-              {error ? `❌ ${error}` : status}
+              {coreStatus.error ? `❌ ${coreStatus.error}` : coreStatus.status}
             </span>
           </div>
           
@@ -826,9 +712,9 @@ class FunPlayer extends Component {
               </span>
             )}
             
-            {this.hasFunscript() && (
+            {core.funscript.hasFunscript() && (
               <span className="fp-unit">
-                {managers.funscript.getChannels().length} channels
+                {core.funscript.getChannels().length} channels
               </span>
             )}
             
@@ -854,9 +740,8 @@ class FunPlayer extends Component {
   }
 
   render() {
-    // ✅ MODIFIÉ: API Managers unifiée
-    const playlistInfo = managers.playlist.getPlaylistInfo();
-    const playlistItems = managers.playlist.getItems();
+    const playlistInfo = core.playlist.getPlaylistInfo();
+    const playlistItems = core.playlist.items;
     
     return (
       <div className="fun-player">

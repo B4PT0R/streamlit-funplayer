@@ -1,209 +1,198 @@
 import { 
   ButtplugClient, 
   ButtplugBrowserWebsocketClientConnector,
-  ActuatorType 
+  ActuatorType
 } from 'buttplug';
+import VirtualDevice from './VirtualDevice';
+import { Actuator } from './Actuator';
+import { Capability, HapticType, CapabilityToHapticType } from './constants';
 
 /**
- * ButtPlugManager - Version simplifiée pour usage avec Managers singleton
- * Plus de sur-engineering pour les problèmes de remount React
+ * ButtPlugManager - ✅ REFACTORISÉ: Status notifications uniformisées
  */
 class ButtPlugManager {
-  constructor() {
-    // Core buttplug objects
+  constructor(notify) {
+    this.notify = notify;
+    
+    // Core buttplug
     this.client = null;
     this.connector = null;
     this.initialized = false;
+    this.intifaceUrl = 'ws://localhost:12345';
     
-    // Default Initiface Websocket URL 
-    this.intifaceUrl = 'ws://localhost:12345';  
-
-    // Device management
+    // Device state
     this.devices = new Map();
-    this.selectedDevice = null;
-    this.capabilities = null;
-    
-    // State tracking
     this.isConnected = false;
     this.isScanning = false;
     
-    // Default actuator mappings
-    this.defaults = { 
-      vibrate: null, 
-      linear: null, 
-      rotate: null, 
-      oscillate: null, 
-      global: null 
-    };
+    // VirtualDevice toujours disponible
+    this.virtualDevice = new VirtualDevice(this.notify)
+    this.devices.set(-1, this.virtualDevice);
+    this.selectedDevice = this.virtualDevice;
     
-    // Event callbacks
-    this.onConfigChanged = null
-    this.onConnectionChanged = null;
-    this.onDeviceChanged = null;
-    this.onError = null;
+    // Actuators array
+    this.actuators = [];
+    this._initActuators();
     
-    // Performance optimization
+    // Global modulation
+    this.globalScale = 1.0;
+    this.globalOffset = 0.0;
+    
+    // Performance & config
     this.throttleMap = new Map();
-    this.minCommandInterval = 16; // ~60fps max
+    this.minCommandInterval = 16;
   }
 
   // ============================================================================
-  // ✅ NOUVEAU: CONFIGURATION METHODS
-  // ============================================================================
-
-  /**
-   * Définir l'URL WebSocket Intiface
-   */
-  setIntifaceUrl(url) {
-    const cleanUrl = this._validateAndCleanUrl(url);
-    
-    if (this.intifaceUrl !== cleanUrl) {
-      const wasConnected = this.isConnected;
-      const oldUrl = this.intifaceUrl;
-      
-      this.intifaceUrl = cleanUrl;
-      
-      // Mettre à jour le connector si l'URL change
-      if (this.connector && this.connector._url !== cleanUrl) {
-        this.connector = new ButtplugBrowserWebsocketClientConnector(cleanUrl);
-      }
-      
-      console.log(`ButtPlug URL changed: ${oldUrl} → ${cleanUrl}`);
-      
-      // Notifier le changement
-      this._notifyConfigChanged('intifaceUrl', {
-        oldUrl,
-        newUrl: cleanUrl,
-        wasConnected
-      });
-    }
-  }
-
-  /**
-   * Récupérer l'URL WebSocket actuelle
-   */
-  getIntifaceUrl() {
-    return this.intifaceUrl;
-  }
-
-  /**
-   * Récupérer la configuration complète
-   */
-  getConfig() {
-    return {
-      intifaceUrl: this.intifaceUrl,
-      // Autres configs futures
-    };
-  }
-
-  /**
-   * Valider et nettoyer une URL WebSocket
-   * @private
-   */
-  _validateAndCleanUrl(url) {
-    if (!url || typeof url !== 'string') {
-      return 'ws://localhost:12345';
-    }
-    
-    // Nettoyer l'URL
-    let cleanUrl = url.trim();
-    
-    // Ajouter ws:// si manquant
-    if (!cleanUrl.startsWith('ws://') && !cleanUrl.startsWith('wss://')) {
-      cleanUrl = 'ws://' + cleanUrl;
-    }
-    
-    // Ajouter port par défaut si manquant
-    try {
-      const urlObj = new URL(cleanUrl);
-      if (!urlObj.port) {
-        urlObj.port = '12345';
-        cleanUrl = urlObj.toString();
-      }
-    } catch (error) {
-      console.warn('Invalid WebSocket URL, using default:', url);
-      return 'ws://localhost:12345';
-    }
-    
-    return cleanUrl;
-  }
-
-  // ============================================================================
-  // INITIALIZATION & CONNECTION - Simplifié
+  // SECTION 1: DEVICE CONNECTION & MANAGEMENT
   // ============================================================================
 
   async init() {
-    if (this.initialized) {
-      return true;
-    }
+    if (this.initialized) return true;
 
     try {
+      // ✅ NOUVEAU: Status notification au lieu de console.log
+      this.notify?.('status:buttplug', { 
+        message: 'Initializing ButtPlug client...', 
+        type: 'processing' 
+      });
+
       this.client = new ButtplugClient('FunPlayer');
-      this.connector = new ButtplugBrowserWebsocketClientConnector('ws://localhost:12345');
+      this.connector = new ButtplugBrowserWebsocketClientConnector(this.intifaceUrl);
       
-      // Setup event listeners
       this.client.addListener('deviceadded', this._onDeviceAdded);
       this.client.addListener('deviceremoved', this._onDeviceRemoved);
       this.client.addListener('disconnect', this._onDisconnect);
       
       this.initialized = true;
-      console.log('ButtPlug client initialized');
+      
+      // ✅ NOUVEAU: Log technique silencieux
+      this.notify?.('status:buttplug', { 
+        message: 'ButtPlug client initialized successfully', 
+        type: 'log' 
+      });
+      
       return true;
 
     } catch (error) {
-      console.error('ButtPlug initialization failed:', error);
-      this._notifyError('Initialization failed', error);
+      // ✅ NOUVEAU: Erreur structurée au lieu de console.error
+      this.notify?.('status:buttplug', { 
+        message: 'Failed to initialize ButtPlug client', 
+        type: 'error',
+        error: error.message || String(error)
+      });
+      
+      this.notify?.('buttplug:error', { message: 'Initialization failed', error: error.message || String(error) });
+      
       return false;
     }
   }
 
   async connect(address = null) {
-    if (this.isConnected) {
-      console.log('Already connected');
-      return true;
-    }
+    if (this.isConnected) return true;
 
-    // ✅ MODIFIÉ: Utiliser l'URL configurée si aucune adresse fournie
     const targetUrl = address || this.intifaceUrl;
-
-    // Init if needed
     if (!this.initialized) {
       const initSuccess = await this.init();
-      if (!initSuccess) {
-        return false;
-      }
+      if (!initSuccess) return false;
     }
 
-    // Update connector if address changed
     if (this.connector._url !== targetUrl) {
       this.connector = new ButtplugBrowserWebsocketClientConnector(targetUrl);
     }
 
     try {
-      console.log('Connecting to Intiface Central at:', targetUrl);
+      // ✅ NOUVEAU: Status au lieu de console.log
+      this.notify?.('status:buttplug', { 
+        message: `Connecting to ${targetUrl}...`, 
+        type: 'processing' 
+      });
       
       await this.client.connect(this.connector);
       this.isConnected = true;
       
-      // ✅ NOUVEAU: Mettre à jour l'URL configurée si une adresse explicite a été fournie
       if (address && address !== this.intifaceUrl) {
         this.setIntifaceUrl(address);
       }
       
-      // Load existing devices
       const existingDevices = this.client.devices;
       existingDevices.forEach(device => {
         this.devices.set(device.index, device);
       });
       
-      console.log(`Connected with ${existingDevices.length} devices`);
-      this._notifyConnection(true);
+      // ✅ NOUVEAU: Status succès + log technique
+      this.notify?.('status:buttplug', { 
+        message: `Connected to Intiface Central`, 
+        type: 'success' 
+      });
+      
+      this.notify?.('status:buttplug', { 
+        message: `Found ${existingDevices.length} existing devices (+ Virtual)`, 
+        type: 'log' 
+      });
+      
+      this.notify?.('buttplug:connection', { connected: true });
+      
       return true;
 
     } catch (error) {
-      console.error('Connection failed:', error);
-      this._notifyError('Connection failed', error);
+      // ✅ NOUVEAU: Erreur structurée
+      this.notify?.('status:buttplug', { 
+        message: 'Failed to connect to Intiface Central', 
+        type: 'error',
+        error: error.message || String(error)
+      });
+      
+      this.notify?.('buttplug:error', { message: 'Connection failed', error: error.message || String(error) });
+      
       return false;
+    }
+  }
+
+  async scan(timeout = 5000) {
+    if (!this.isConnected || this.isScanning) return [];
+
+    try {
+      this.isScanning = true;
+      const initialCount = this.devices.size;
+      
+      // ✅ NOUVEAU: Status scanning
+      this.notify?.('status:buttplug', { 
+        message: 'Scanning for devices...', 
+        type: 'processing' 
+      });
+      
+      await this.client.startScanning();
+      await new Promise(resolve => setTimeout(resolve, timeout));
+      await this.client.stopScanning();
+      
+      const newCount = this.devices.size - initialCount;
+      
+      // ✅ NOUVEAU: Résultat scan
+      if (newCount > 0) {
+        this.notify?.('status:buttplug', { 
+          message: `Found ${newCount} new device(s)`, 
+          type: 'success' 
+        });
+      } else {
+        this.notify?.('status:buttplug', { 
+          message: 'No new devices found', 
+          type: 'info' 
+        });
+      }
+      
+      const allDevices = Array.from(this.devices.values());
+      return allDevices.slice(-newCount);
+    } catch (error) {
+      // ✅ NOUVEAU: Erreur scan
+      this.notify?.('status:buttplug', { 
+        message: 'Device scan failed', 
+        type: 'error',
+        error: error.message || String(error)
+      });
+      return [];
+    } finally {
+      this.isScanning = false;
     }
   }
 
@@ -214,136 +203,323 @@ class ButtPlugManager {
       if (this.client) {
         await this.client.disconnect();
       }
+      
+      // ✅ NOUVEAU: Status disconnection
+      this.notify?.('status:buttplug', { 
+        message: 'Disconnected from Intiface Central', 
+        type: 'info' 
+      });
+      
     } catch (error) {
-      console.error('Disconnect error:', error);
+      // ✅ NOUVEAU: Erreur disconnection (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `Disconnect error: ${error.message}`, 
+        type: 'log' 
+      });
     }
     
-    this._resetState();
-  }
-
-  async cleanup() {
-    // Stop all devices
-    if (this.isConnected && this.client) {
-      try {
-        await this.client.stopAllDevices();
-      } catch (error) {
-        console.error('Stop all devices failed:', error);
-      }
-    }
-    
-    // Disconnect
-    if (this.isConnected && this.client) {
-      try {
-        await this.client.disconnect();
-      } catch (error) {
-        console.error('Disconnect failed:', error);
-      }
-    }
-    
-    // Cleanup references
-    if (this.client) {
-      try {
-        this.client.removeAllListeners();
-      } catch (error) {
-        console.error('Remove listeners failed:', error);
-      }
-      this.client = null;
-    }
-    
-    this.connector = null;
-    this.throttleMap.clear();
-    
-    // Reset state
-    this.initialized = false;
-    this.isConnected = false;
-    this.isScanning = false;
-    this.devices.clear();
-    this._resetDevice();
-
-    console.log('ButtPlug cleanup completed');
-  }
-
-  // ============================================================================
-  // DEVICE SCANNING & MANAGEMENT - Inchangé
-  // ============================================================================
-
-  async scan(timeout = 5000) {
-    if (!this.isConnected || this.isScanning) return [];
-
-    try {
-      this.isScanning = true;
-      const initialCount = this.devices.size;
-      
-      console.log('Starting device scan...');
-      await this.client.startScanning();
-      
-      await new Promise(resolve => setTimeout(resolve, timeout));
-      
-      await this.client.stopScanning();
-      
-      const newCount = this.devices.size - initialCount;
-      console.log(`Scan complete: ${newCount} new devices found`);
-      
-      const allDevices = Array.from(this.devices.values());
-      return allDevices.slice(-newCount);
-    } catch (error) {
-      console.error('Scan failed:', error);
-      return [];
-    } finally {
-      this.isScanning = false;
-    }
-  }
-
-  getDevices() {
-    return Array.from(this.devices.values());
+    this._resetConnectionState();
   }
 
   selectDevice(deviceIndex) {
     if (deviceIndex === null || deviceIndex === undefined) {
-      this._resetDevice();
-      return true;
+      return this.selectDevice(-1); // VirtualDevice par défaut
     }
 
     const device = this.devices.get(deviceIndex);
     if (!device) {
-      console.error(`Device ${deviceIndex} not found`);
+      // ✅ NOUVEAU: Erreur device not found
+      this.notify?.('status:buttplug', { 
+        message: `Device ${deviceIndex} not found`, 
+        type: 'error' 
+      });
       return false;
     }
 
     this.selectedDevice = device;
-    this.capabilities = this._buildCapabilities(device);
-    this._setDefaults();
+    this._initActuators(); // Reconstruire array d'actuateurs
     
-    console.log(`Selected device: ${device.name} (${deviceIndex})`);
-    this._notifyDeviceChanged(device);
+    const deviceType = deviceIndex === -1 ? 'Virtual Device' : device.name;
+    
+    // ✅ NOUVEAU: Status device selected
+    this.notify?.('status:buttplug', { 
+      message: `Selected: ${deviceType}`, 
+      type: 'success' 
+    });
+    
+    this.notify?.('buttplug:device', { device });
+    
     return true;
   }
 
-  getSelected() {
-    return this.selectedDevice;
-  }
+  // ============================================================================
+  // SECTION 2: ACTUATORS MANAGEMENT
+  // ============================================================================
 
-  getCapabilities() {
-    return this.capabilities;
-  }
+  _initActuators() {
+    // Débrancher tous les actuateurs existants
+    this.actuators.forEach(actuator => actuator.unplug());
+    this.actuators = [];
 
-  getDeviceInfo(deviceIndex = null) {
-    const device = deviceIndex !== null ? this.devices.get(deviceIndex) : this.selectedDevice;
-    if (!device) return null;
+    if (!this.selectedDevice) return;
+
+    this.actuators = this._buildActuators(this.selectedDevice);
     
-    return {
-      index: device.index,
-      name: device.name,
-      displayName: device.displayName,
-      messageTimingGap: device.messageTimingGap,
-      connected: true,
-      capabilities: deviceIndex === null && this.selectedDevice === device ? 
-        this.capabilities : this._buildCapabilities(device)
-    };
+    // ✅ NOUVEAU: Log technique actuators
+    this.notify?.('status:buttplug', { 
+      message: `Built ${this.actuators.length} actuators for ${this.selectedDevice.name}`, 
+      type: 'log' 
+    });
+  }
+
+  _buildActuators(device) {
+    const messageAttrs = device.messageAttributes;
+    const actuators = [];
+
+    // ✅ NOUVEAU: Log technique détaillé
+    this.notify?.('status:buttplug', { 
+      message: `Building actuators for device: ${device.name}`, 
+      type: 'log' 
+    });
+    
+    this.notify?.('status:buttplug', { 
+      message: `Device messageAttributes: ${JSON.stringify(messageAttrs)}`, 
+      type: 'log' 
+    });
+
+    // ScalarCmd - Créer un actuateur par ActuatorType
+    if (messageAttrs.ScalarCmd) {
+      messageAttrs.ScalarCmd.forEach(attr => {
+        this.notify?.('status:buttplug', { 
+          message: `Processing ScalarCmd attr: ${JSON.stringify(attr)}`, 
+          type: 'log' 
+        });
+        
+        let capability, type;
+        
+        if (attr.ActuatorType === ActuatorType.Vibrate) {
+          this.notify?.('status:buttplug', { 
+            message: 'Matched Vibrate actuator', 
+            type: 'log' 
+          });
+          capability = Capability.VIBRATE;
+          type = HapticType.SCALAR;
+        } else if (attr.ActuatorType === ActuatorType.Oscillate) {
+          this.notify?.('status:buttplug', { 
+            message: 'Matched Oscillate actuator', 
+            type: 'log' 
+          });
+          capability = Capability.OSCILLATE;
+          type = HapticType.SCALAR;
+        } else {
+          this.notify?.('status:buttplug', { 
+            message: `No match for ActuatorType: ${attr.ActuatorType}`, 
+            type: 'log' 
+          });
+        }
+        
+        if (capability) {
+          this.notify?.('status:buttplug', { 
+            message: `Creating actuator with capability: ${capability}`, 
+            type: 'log' 
+          });
+          const actuator = new Actuator(attr.Index, capability, {
+            metadata: {
+              name: `${device.name} #${attr.Index}`,
+              featureDescriptor: attr.FeatureDescriptor || '',
+              stepCount: attr.StepCount || 20
+            }
+          }, this.notify);
+          actuators.push(actuator);
+        }
+      });
+    }
+
+    // LinearCmd - Créer un actuateur linear par index
+    if (messageAttrs.LinearCmd) {
+      messageAttrs.LinearCmd.forEach(attr => {
+        this.notify?.('status:buttplug', { 
+          message: `Processing LinearCmd attr: ${JSON.stringify(attr)}`, 
+          type: 'log' 
+        });
+        const actuator = new Actuator(attr.Index, Capability.LINEAR, {
+          metadata: {
+            name: `${device.name} #${attr.Index}`,
+            featureDescriptor: attr.FeatureDescriptor || '',
+            stepCount: attr.StepCount || 20
+          }
+        }, this.notify);
+        actuators.push(actuator);
+      });
+    }
+
+    // RotateCmd - Créer un actuateur rotate par index
+    if (messageAttrs.RotateCmd) {
+      messageAttrs.RotateCmd.forEach(attr => {
+        this.notify?.('status:buttplug', { 
+          message: `Processing RotateCmd attr: ${JSON.stringify(attr)}`, 
+          type: 'log' 
+        });
+        const actuator = new Actuator(attr.Index, Capability.ROTATE, {
+          metadata: {
+            name: `${device.name} #${attr.Index}`,
+            featureDescriptor: attr.FeatureDescriptor || '',
+            stepCount: attr.StepCount || 20
+          }
+        }, this.notify);
+        actuators.push(actuator);
+      });
+    }
+
+    // Trier par index pour un ordre cohérent
+    actuators.sort((a, b) => a.index - b.index);
+
+    this.notify?.('status:buttplug', { 
+      message: `Final actuators array: ${actuators.length} actuators`, 
+      type: 'log' 
+    });
+    
+    return actuators;
   }
 
   // ============================================================================
-  // HAPTIC COMMANDS - Simplifiés
+  // SECTION 3: API SIMPLIFIÉE
+  // ============================================================================
+
+  getActuators() {
+    return [...this.actuators];
+  }
+
+  getActuator(index) {
+    return this.actuators.find(actuator => actuator.index === index) || null;
+  }
+
+  getActuatorsByCapability(capability) {
+    return this.actuators.filter(actuator => actuator.capability === capability);
+  }
+
+  setActuatorSettings(actuatorIndex, settings) {
+    const actuator = this.getActuator(actuatorIndex);
+    if (!actuator) return false;
+
+    actuator.updateSettings(settings);
+    this.notify?.('buttplug:actuatorOptions', { actuatorIndex, options: actuator.settings });
+    
+    return true;
+  }
+
+  getActuatorSettings(actuatorIndex) {
+    const actuator = this.getActuator(actuatorIndex);
+    return actuator ? { ...actuator.settings } : null;
+  }
+
+  plugChannelToActuator(channel, actuatorIndex) {
+    const actuator = this.getActuator(actuatorIndex);
+    if (!actuator) return false;
+
+    const success = channel.plug(actuator);
+    if (success) {
+      this.notify?.('buttplug:mapping', { channel: channel.name, actuatorIndex });
+    }
+    return success;
+  }
+
+  unplugChannelFromActuator(channel, actuatorIndex) {
+    const actuator = this.getActuator(actuatorIndex);
+    if (!actuator) return false;
+
+    channel.unplug(actuator);
+    this.notify?.('buttplug:mapping', { channel: channel.name, actuatorIndex: null });
+    
+    return true;
+  }
+
+  unplugAllChannels() {
+    this.actuators.forEach(actuator => actuator.unplug());
+    this.notify?.('buttplug:mapping', { channel: null, actuatorIndex: null });
+  }
+
+  // ============================================================================
+  // SECTION 4: GLOBAL MODULATION
+  // ============================================================================
+
+  setGlobalScale(scale) {
+    const newScale = typeof scale === 'number' ? Math.max(0, Math.min(5.0, scale)) : 1.0;
+    
+    if (this.globalScale !== newScale) {
+      this.globalScale = newScale;
+      this.notify?.('buttplug:globalScale', { scale: newScale });
+    }
+  }
+
+  getGlobalScale() {
+    return this.globalScale;
+  }
+
+  setGlobalOffset(offset) {
+    const newOffset = typeof offset === 'number' ? offset : 0.0;
+    
+    if (this.globalOffset !== newOffset) {
+      this.globalOffset = newOffset;
+      this.notify?.('buttplug:globalOffset', { offset: newOffset });
+    }
+  }
+
+  getGlobalOffset() {
+    return this.globalOffset;
+  }
+
+  // ============================================================================
+  // SECTION 5: HAPTIC ORCHESTRATION
+  // ============================================================================
+
+  getTimeWithOffsets(currentTime) {
+    const channelTimings = new Map();
+    
+    for (const actuator of this.actuators) {
+      if (actuator.isPlugged() && actuator.settings.enabled) {
+        const channel = actuator.assignedChannel;
+        const adjustedTime = currentTime + this.globalOffset + actuator.settings.timeOffset;
+        channelTimings.set(channel.name, adjustedTime);
+      }
+    }
+    
+    return channelTimings;
+  }
+
+  async processChannels(rawValues) {
+    if (!this.selectedDevice) {
+      return new Map();
+    }
+
+    const visualizerData = new Map();
+    
+    for (const actuator of this.actuators) {
+      if (actuator.isPlugged() && actuator.settings.enabled) {
+        const channel = actuator.assignedChannel;
+        const rawValue = rawValues[channel.name];
+        
+        if (rawValue !== undefined && rawValue !== null) {
+          // Traiter la valeur via l'actuateur
+          const command = actuator.process(rawValue, this.globalScale);
+          
+          // Envoyer au device
+          await this.sendThrottled(actuator.capability, command.value, actuator.index, command.options);
+          
+          // Préparer données visualizer
+          visualizerData.set(actuator.index, {
+            value: command.value,
+            type: actuator.capability
+          });
+        }
+      }
+    }
+
+    return visualizerData;
+  }
+
+  // ============================================================================
+  // SECTION 6: DEVICE COMMANDS
   // ============================================================================
 
   async vibrate(value, actuatorIndex = null) {
@@ -355,14 +531,10 @@ class ButtPlugManager {
   }
 
   async linear(value, duration = 100, actuatorIndex = null) {
-    if (!this.selectedDevice) {
-      throw new Error('No device selected');
-    }
+    if (!this.selectedDevice) throw new Error('No device selected');
     
-    const resolvedIndex = this._resolveActuatorIndex('linear', actuatorIndex);
-    if (resolvedIndex === null) {
-      throw new Error('No linear actuator available');
-    }
+    const resolvedIndex = this._resolveActuatorIndex(Capability.LINEAR, actuatorIndex);
+    if (resolvedIndex === null) throw new Error('No linear actuator available');
 
     try {
       const clampedValue = Math.max(0, Math.min(1, value));
@@ -371,20 +543,20 @@ class ButtPlugManager {
       await this.selectedDevice.linear([[clampedValue, clampedDuration]]);
       return true;
     } catch (error) {
-      console.error('Linear command failed:', error);
+      // ✅ NOUVEAU: Erreur commande (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `Linear command failed: ${error.message}`, 
+        type: 'log' 
+      });
       return false;
     }
   }
 
   async rotate(value, actuatorIndex = null) {
-    if (!this.selectedDevice) {
-      throw new Error('No device selected');
-    }
+    if (!this.selectedDevice) throw new Error('No device selected');
     
-    const resolvedIndex = this._resolveActuatorIndex('rotate', actuatorIndex);
-    if (resolvedIndex === null) {
-      throw new Error('No rotate actuator available');
-    }
+    const resolvedIndex = this._resolveActuatorIndex(Capability.ROTATE, actuatorIndex);
+    if (resolvedIndex === null) throw new Error('No rotate actuator available');
 
     try {
       const speed = Math.abs(value);
@@ -393,49 +565,18 @@ class ButtPlugManager {
       await this.selectedDevice.rotate([[speed, clockwise]]);
       return true;
     } catch (error) {
-      console.error('Rotate command failed:', error);
+      // ✅ NOUVEAU: Erreur commande (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `Rotate command failed: ${error.message}`, 
+        type: 'log' 
+      });
       return false;
     }
   }
 
-  async sendDefault(value, duration = 100) {
-    if (this.defaults.global === null) {
-      throw new Error('No default actuator set');
-    }
-    
-    const type = this.getActuatorType(this.defaults.global);
-    switch (type) {
-      case 'vibrate':
-        return this.vibrate(value, this.defaults.global);
-      case 'oscillate':
-        return this.oscillate(value, this.defaults.global);
-      case 'linear':
-        return this.linear(value, duration, this.defaults.global);
-      case 'rotate':
-        return this.rotate(value, this.defaults.global);
-      default:
-        throw new Error(`Unknown actuator type: ${type}`);
-    }
-  }
-
-  async stopAll() {
-    if (!this.isConnected || !this.client) return;
-    
-    try {
-      await this.client.stopAllDevices();
-      console.log('All devices stopped');
-    } catch (error) {
-      console.error('Stop all failed:', error);
-    }
-  }
-
-  // ============================================================================
-  // PERFORMANCE & UTILITY - Inchangé
-  // ============================================================================
-
-  async sendThrottled(type, value, actuatorIndex, options = {}) {
+  async sendThrottled(capability, value, actuatorIndex, options = {}) {
     const now = Date.now();
-    const key = `${type}-${actuatorIndex}`;
+    const key = `${capability}-${actuatorIndex}`;
     const lastSent = this.throttleMap.get(key) || 0;
     
     if (now - lastSent < this.minCommandInterval && !options.force) {
@@ -445,71 +586,77 @@ class ButtPlugManager {
     this.throttleMap.set(key, now);
     
     try {
-      switch (type) {
-        case 'vibrate':
+      switch (capability) {
+        case Capability.VIBRATE:
           return await this.vibrate(value, actuatorIndex);
-        case 'oscillate':
+        case Capability.OSCILLATE:
           return await this.oscillate(value, actuatorIndex);
-        case 'linear':
+        case Capability.LINEAR:
           return await this.linear(value, options.duration || 100, actuatorIndex);
-        case 'rotate':
+        case Capability.ROTATE:
           return await this.rotate(value, actuatorIndex);
         default:
-          console.error(`Unknown command type: ${type}`);
+          // ✅ NOUVEAU: Erreur capability inconnue (log technique)
+          this.notify?.('status:buttplug', { 
+            message: `Unknown capability: ${capability}`, 
+            type: 'log' 
+          });
           return false;
       }
     } catch (error) {
-      console.error(`Throttled ${type} command failed:`, error);
-      return false;
+      return false; // Silent fail
     }
   }
 
-  // ============================================================================
-  // DEVICE INFO & SENSORS - Inchangé
-  // ============================================================================
-
-  async getBattery(deviceIndex = null) {
-    const device = deviceIndex !== null ? this.devices.get(deviceIndex) : this.selectedDevice;
-    if (!device || !device.hasBattery) return null;
+  async stopAll() {
+    if (!this.isConnected || !this.client) return;
     
     try {
-      return await device.battery();
+      await this.client.stopAllDevices();
+      
+      // ✅ NOUVEAU: Status stop all (log technique)
+      this.notify?.('status:buttplug', { 
+        message: 'All devices stopped', 
+        type: 'log' 
+      });
     } catch (error) {
-      console.error('Battery read failed:', error);
-      return null;
-    }
-  }
-
-  async getRSSI(deviceIndex = null) {
-    const device = deviceIndex !== null ? this.devices.get(deviceIndex) : this.selectedDevice;
-    if (!device || !device.hasRssi) return null;
-    
-    try {
-      return await device.rssi();
-    } catch (error) {
-      console.error('RSSI read failed:', error);
-      return null;
+      // ✅ NOUVEAU: Erreur stop all (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `Stop all failed: ${error.message}`, 
+        type: 'log' 
+      });
     }
   }
 
   // ============================================================================
-  // CONFIGURATION & STATUS - Inchangé
+  // SECTION 7: UTILITIES & INFO
   // ============================================================================
 
-  setDefaults(vibrate = null, linear = null, rotate = null, oscillate = null, global = null) {
-    if (!this.capabilities) return false;
-    
-    this.defaults.vibrate = this._resolveDefault('vibrate', vibrate);
-    this.defaults.linear = this._resolveDefault('linear', linear);
-    this.defaults.rotate = this._resolveDefault('rotate', rotate);
-    this.defaults.oscillate = this._resolveDefault('oscillate', oscillate);
-    this.defaults.global = global !== null ? global : this._pickGlobalDefault();
-    
-    return true;
+  getDevices() {
+    return Array.from(this.devices.values());
   }
 
-  getDefaults() {
-    return { ...this.defaults };
+  getSelected() {
+    return this.selectedDevice;
+  }
+
+  getDeviceInfo() {
+    if (!this.selectedDevice) return null;
+
+    return {
+      deviceName: this.selectedDevice.name,
+      deviceIndex: this.selectedDevice.index,
+      actuatorCount: this.actuators.length,
+      actuators: this.actuators.map(actuator => ({
+        index: actuator.index,
+        type: actuator.type,
+        capability: actuator.capability,
+        enabled: actuator.settings.enabled,
+        assignedChannel: actuator.getAssignedChannelName(),
+        metadata: actuator.metadata
+      })),
+      messageTimingGap: this.selectedDevice.messageTimingGap || 0
+    };
   }
 
   getStatus() {
@@ -521,44 +668,52 @@ class ButtPlugManager {
         index: this.selectedDevice.index,
         name: this.selectedDevice.name
       } : null,
-      capabilities: this.capabilities,
-      defaults: this.getDefaults(),
-      config: this.getConfig()  // ✅ AJOUTÉ: Include config in status
+      actuatorCount: this.actuators.length,
+      globalScale: this.globalScale,
+      globalOffset: this.globalOffset,
+      config: { intifaceUrl: this.intifaceUrl }
     };
   }
 
-  getActuatorType(index) {
-    if (!this.capabilities || !this.capabilities.actuators[index]) {
-      return null;
-    }
+  setIntifaceUrl(url) {
+    const cleanUrl = this._validateAndCleanUrl(url);
     
-    const caps = this.capabilities.actuators[index];
-    if (caps.vibrate) return 'vibrate';
-    if (caps.oscillate) return 'oscillate';
-    if (caps.linear) return 'linear';
-    if (caps.rotate) return 'rotate';
-    return null;
+    if (this.intifaceUrl !== cleanUrl) {
+      const wasConnected = this.isConnected;
+      const oldUrl = this.intifaceUrl;
+      
+      this.intifaceUrl = cleanUrl;
+      
+      if (this.connector && this.connector._url !== cleanUrl) {
+        this.connector = new ButtplugBrowserWebsocketClientConnector(cleanUrl);
+      }
+      
+      // ✅ NOUVEAU: Status URL change (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `URL changed: ${oldUrl} → ${cleanUrl}`, 
+        type: 'log' 
+      });
+      
+      this.notify?.('buttplug:config', { 
+        key: 'intifaceUrl', 
+        data: { oldUrl, newUrl: cleanUrl, wasConnected } 
+      });
+    }
   }
 
-  getActuatorsByType(type) {
-    if (!this.capabilities) return [];
-    
-    return this.capabilities.actuators
-      .map((caps, index) => caps[type] ? index : null)
-      .filter(index => index !== null);
+  getIntifaceUrl() {
+    return this.intifaceUrl;
   }
 
   // ============================================================================
-  // PRIVATE METHODS - Simplifiés
+  // SECTION 8: PRIVATE METHODS
   // ============================================================================
 
   _sendScalarCommand = async (actuatorType, value, actuatorIndex = null) => {
-    if (!this.selectedDevice) {
-      throw new Error('No device selected');
-    }
+    if (!this.selectedDevice) throw new Error('No device selected');
 
-    const typeKey = actuatorType === ActuatorType.Vibrate ? 'vibrate' : 'oscillate';
-    const resolvedIndex = this._resolveActuatorIndex(typeKey, actuatorIndex);
+    const capability = actuatorType === ActuatorType.Vibrate ? Capability.VIBRATE : Capability.OSCILLATE;
+    const resolvedIndex = this._resolveActuatorIndex(capability, actuatorIndex);
     
     if (resolvedIndex === null) {
       throw new Error(`No ${actuatorType} actuator available`);
@@ -575,227 +730,182 @@ class ButtPlugManager {
       
       return true;
     } catch (error) {
-      console.error(`${actuatorType} command failed:`, error);
+      // ✅ NOUVEAU: Erreur scalar command (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `${actuatorType} command failed: ${error.message}`, 
+        type: 'log' 
+      });
       return false;
     }
   }
 
-  _buildCapabilities = (device) => {
-    const messageAttrs = device.messageAttributes;
-    const actuators = [];
-    const counts = { vibrate: 0, linear: 0, rotate: 0, oscillate: 0 };
-    let maxIndex = -1;
-
-    // Process scalar commands
-    if (messageAttrs.ScalarCmd) {
-      messageAttrs.ScalarCmd.forEach((attr) => {
-        maxIndex = Math.max(maxIndex, attr.Index);
-        
-        if (!actuators[attr.Index]) {
-          actuators[attr.Index] = { 
-            index: attr.Index, 
-            vibrate: false, 
-            oscillate: false, 
-            linear: false, 
-            rotate: false,
-            stepCount: attr.StepCount || 20,
-            featureDescriptor: attr.FeatureDescriptor || ''
-          };
-        }
-        
-        if (attr.ActuatorType === ActuatorType.Vibrate) {
-          actuators[attr.Index].vibrate = true;
-          counts.vibrate++;
-        } else if (attr.ActuatorType === ActuatorType.Oscillate) {
-          actuators[attr.Index].oscillate = true;
-          counts.oscillate++;
-        }
-      });
-    }
-
-    // Process linear commands
-    if (messageAttrs.LinearCmd) {
-      messageAttrs.LinearCmd.forEach((attr) => {
-        maxIndex = Math.max(maxIndex, attr.Index);
-        
-        if (!actuators[attr.Index]) {
-          actuators[attr.Index] = { 
-            index: attr.Index, 
-            vibrate: false, 
-            oscillate: false, 
-            linear: false, 
-            rotate: false,
-            stepCount: attr.StepCount || 20,
-            featureDescriptor: attr.FeatureDescriptor || ''
-          };
-        }
-        
-        actuators[attr.Index].linear = true;
-        counts.linear++;
-      });
-    }
-
-    // Process rotate commands
-    if (messageAttrs.RotateCmd) {
-      messageAttrs.RotateCmd.forEach((attr) => {
-        maxIndex = Math.max(maxIndex, attr.Index);
-        
-        if (!actuators[attr.Index]) {
-          actuators[attr.Index] = { 
-            index: attr.Index, 
-            vibrate: false, 
-            oscillate: false, 
-            linear: false, 
-            rotate: false,
-            stepCount: attr.StepCount || 20,
-            featureDescriptor: attr.FeatureDescriptor || ''
-          };
-        }
-        
-        actuators[attr.Index].rotate = true;
-        counts.rotate++;
-      });
-    }
-
-    // Create final actuator array
-    const validActuators = [];
-    for (let i = 0; i <= maxIndex; i++) {
-      if (actuators[i]) {
-        validActuators.push(actuators[i]);
-      }
-    }
-
-    return {
-      actuators: validActuators,
-      counts,
-      total: validActuators.length,
-      deviceName: device.name,
-      deviceIndex: device.index,
-      messageTimingGap: device.messageTimingGap || 0
-    };
-  }
-
-  _resolveActuatorIndex = (type, requestedIndex) => {
+  _resolveActuatorIndex = (capability, requestedIndex) => {
     if (requestedIndex !== null && requestedIndex !== undefined) {
-      if (this.capabilities?.actuators[requestedIndex]?.[type]) {
+      const actuator = this.getActuator(requestedIndex);
+      if (actuator && actuator.capability === capability) {
         return requestedIndex;
       }
       return null;
     }
     
-    if (this.defaults[type] !== null) {
-      return this.defaults[type];
+    const available = this.getActuatorsByCapability(capability);
+    return available.length > 0 ? available[0].index : null;
+  }
+
+  _validateAndCleanUrl(url) {
+    if (!url || typeof url !== 'string') {
+      return 'ws://localhost:12345';
     }
     
-    const available = this.getActuatorsByType(type);
-    return available.length > 0 ? available[0] : null;
-  }
-
-  _resolveDefault = (type, requested) => {
-    if (requested !== null && this.capabilities?.actuators[requested]?.[type]) {
-      return requested;
+    let cleanUrl = url.trim();
+    
+    if (!cleanUrl.startsWith('ws://') && !cleanUrl.startsWith('wss://')) {
+      cleanUrl = 'ws://' + cleanUrl;
     }
     
-    const available = this.getActuatorsByType(type);
-    return available.length > 0 ? available[0] : null;
-  }
-
-  _pickGlobalDefault = () => {
-    return this.defaults.linear ?? this.defaults.vibrate ?? this.defaults.rotate ?? this.defaults.oscillate ?? null;
-  }
-
-  _setDefaults = () => {
-    if (!this.capabilities) return;
+    try {
+      const urlObj = new URL(cleanUrl);
+      if (!urlObj.port) {
+        urlObj.port = '12345';
+        cleanUrl = urlObj.toString();
+      }
+    } catch (error) {
+      // ✅ NOUVEAU: Warning URL invalide (log technique)
+      this.notify?.('status:buttplug', { 
+        message: `Invalid WebSocket URL, using default: ${url}`, 
+        type: 'log' 
+      });
+      return 'ws://localhost:12345';
+    }
     
-    this.defaults.vibrate = this._resolveDefault('vibrate', null);
-    this.defaults.oscillate = this._resolveDefault('oscillate', null);
-    this.defaults.linear = this._resolveDefault('linear', null);
-    this.defaults.rotate = this._resolveDefault('rotate', null);
-    this.defaults.global = this._pickGlobalDefault();
+    return cleanUrl;
   }
 
   _resetDevice = () => {
-    this.selectedDevice = null;
-    this.capabilities = null;
-    this.defaults = { vibrate: null, linear: null, rotate: null, oscillate: null, global: null };
-    this._notifyDeviceChanged(null);
+    this.selectedDevice = this.virtualDevice;
+    this._initActuators();
+    this._notifyDeviceChanged(this.virtualDevice);
   }
 
-  _resetState = () => {
+  _resetConnectionState = () => {
     this.isConnected = false;
     this.isScanning = false;
+    
     this.devices.clear();
+    this.devices.set(-1, this.virtualDevice);
+    
     this.throttleMap.clear();
     this._resetDevice();
-    this._notifyConnection(false);
+    
+    this.notify?.('buttplug:connection', { connected: false });
   }
 
   // ============================================================================
-  // EVENT HANDLERS - Simplifiés
+  // SECTION 9: EVENT HANDLERS & NOTIFICATIONS
   // ============================================================================
 
   _onDeviceAdded = (device) => {
     this.devices.set(device.index, device);
-    console.log(`Device added: ${device.name} (${device.index})`);
-    this._notifyDeviceChanged();
+    
+    // ✅ NOUVEAU: Status device added
+    this.notify?.('status:buttplug', { 
+      message: `Device connected: ${device.name}`, 
+      type: 'success' 
+    });
+    
+    this.notify?.('buttplug:device', { device: undefined }); // Device list changed
   }
 
   _onDeviceRemoved = (device) => {
     this.devices.delete(device.index);
     
     if (this.selectedDevice?.index === device.index) {
-      this._resetDevice();
+      this.selectDevice(-1); // Retomber sur VirtualDevice
     }
     
-    console.log(`Device removed: ${device.name} (${device.index})`);
-    this._notifyDeviceChanged();
+    // ✅ NOUVEAU: Status device removed
+    this.notify?.('status:buttplug', { 
+      message: `Device disconnected: ${device.name}`, 
+      type: 'info' 
+    });
+    
+    this.notify?.('buttplug:device', { device: undefined }); // Device list changed
   }
 
   _onDisconnect = () => {
-    console.log('Disconnected from server');
-    this._resetState();
-  }
-
-  // ============================================================================
-  // NOTIFICATIONS - Simplifiées
-  // ============================================================================
-
-  _notifyConfigChanged = (key, data) => {
-    if (this.onConfigChanged) {
-      this.onConfigChanged(key, data);
-    }
-  }
-
-  _notifyConnection = (connected) => {
-    if (this.onConnectionChanged) {
-      this.onConnectionChanged(connected);
-    }
-  }
-
-  _notifyDeviceChanged = (device = undefined) => {
-    if (this.onDeviceChanged) {
-      this.onDeviceChanged(device);
-    }
-  }
-
-  _notifyError = (message, error = null) => {
-    console.error(`[ButtPlug] ${message}`, error);
+    // ✅ NOUVEAU: Status disconnection
+    this.notify?.('status:buttplug', { 
+      message: 'Lost connection to Intiface Central', 
+      type: 'error' 
+    });
     
-    if (this.onError) {
-      let errorMessage = 'Unknown error';
-      
-      if (error) {
-        if (typeof error === 'string') {
-          errorMessage = error;
-        } else if (error.message) {
-          errorMessage = error.message;
-        } else {
-          errorMessage = String(error);
-        }
+    this._resetConnectionState();
+  }
+
+  // ============================================================================
+  // SECTION 10: CLEANUP
+  // ============================================================================
+
+  async cleanup() {
+    // Stop all devices
+    if (this.isConnected && this.client) {
+      try {
+        await this.client.stopAllDevices();
+      } catch (error) {
+        // ✅ NOUVEAU: Erreur cleanup (log technique)
+        this.notify?.('status:buttplug', { 
+          message: `Stop all devices failed during cleanup: ${error.message}`, 
+          type: 'log' 
+        });
       }
-      
-      this.onError(message, errorMessage);
     }
+    
+    // Disconnect
+    if (this.isConnected && this.client) {
+      try {
+        await this.client.disconnect();
+      } catch (error) {
+        // ✅ NOUVEAU: Erreur cleanup (log technique)
+        this.notify?.('status:buttplug', { 
+          message: `Disconnect failed during cleanup: ${error.message}`, 
+          type: 'log' 
+        });
+      }
+    }
+    
+    // Cleanup references
+    if (this.client) {
+      try {
+        this.client.removeAllListeners();
+      } catch (error) {
+        // ✅ NOUVEAU: Erreur cleanup (log technique)
+        this.notify?.('status:buttplug', { 
+          message: `Remove listeners failed during cleanup: ${error.message}`, 
+          type: 'log' 
+        });
+      }
+      this.client = null;
+    }
+    
+    this.connector = null;
+    this.throttleMap.clear();
+    
+    // Débrancher tous les actuateurs
+    this.actuators.forEach(actuator => actuator.unplug());
+    this.actuators = [];
+    
+    this.initialized = false;
+    this.isConnected = false;
+    this.isScanning = false;
+    this.devices.clear();
+    this.devices.set(-1, this.virtualDevice);
+    this._resetDevice();
+
+    // ✅ NOUVEAU: Status cleanup complet
+    this.notify?.('status:buttplug', { 
+      message: 'ButtPlug cleanup completed', 
+      type: 'log' 
+    });
   }
 }
 
