@@ -2,18 +2,19 @@
 # MÉTADONNÉES DU PACKAGE
 # ============================================================================
 
-from pathlib import Path
-import toml
-
-ROOT=Path(__file__).parent.parent
-with open(ROOT/"pyproject.toml",encoding="utf-8") as f:
-    config=toml.load(f)
-
-# Package metadata
-__version__ = config['project']['version']
-__author__ = config['project']['authors'][0]['name']
-__email__ = config['project']['authors'][0]['email']
-__description__ = config['project']['description']
+try:
+    from importlib.metadata import version, metadata
+    # Package metadata
+    __version__ = version('streamlit-funplayer')
+    meta=metadata('streamlit-funplayer')
+    __author__=meta.get('Author',"unknown")
+    __email__ = meta.get('Author-email',"")
+    __description__ = meta.get('Summary','')
+except Exception as e:
+    __version__="0.0.0"
+    __author__='unknown'
+    __email__=""
+    __description__=""
 
 # ✅ NOUVEAU: Export des utilitaires
 __all__ = [
