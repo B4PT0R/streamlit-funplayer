@@ -423,17 +423,17 @@ export class Channel {
 
   interpolateAt(time) {
     if (this.actions.length === 0) {
-      return null;
+      return 0;
     }
 
     const timeMs = time * 1000;
 
     // Gestion cas limites
     if (timeMs <= this.actions[0].time) {
-      return this.actions[0].value;
+      return 0;
     }
     if (timeMs >= this.actions[this.actions.length - 1].time) {
-      return this.actions[this.actions.length - 1].value;
+      return 0;
     }
 
     // Optimisation du cache pour éviter les recherches

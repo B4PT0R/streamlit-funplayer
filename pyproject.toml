@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "streamlit-funplayer"
-version = "0.1.17"
+version = "0.1.18"
 description = "Streamlit component for synchronized media and haptic playback using funscripts and Buttplug.io compatible devices"
 readme = "README.md"
 keywords = [ "streamlit", "component", "media-player", "haptic-feedback", "funscript", "buttplug", "adult-tech", "interactive-media", "vr", "react",]

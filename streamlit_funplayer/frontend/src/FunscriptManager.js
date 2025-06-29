@@ -221,18 +221,13 @@ class FunscriptManager {
       const channel = this.getChannel(channelName);
       if (channel) {
         const value = channel.interpolateAt(t_canal);
-        if (value !== null) {
+        if (value!=null){
           result[channelName] = value;
         }
       }
     }
     
     return result;
-  }
-
-  interpolateChannel(channelName, time) {
-    const channel = this.getChannel(channelName);
-    return channel ? channel.interpolateAt(time) : null;
   }
 
   // ============================================================================
