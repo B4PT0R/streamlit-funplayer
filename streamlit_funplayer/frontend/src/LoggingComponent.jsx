@@ -1,5 +1,4 @@
 import React, { Component } from 'react';
-import core from './FunPlayerCore';
 
 /**
  * LoggingComponent - Composant de debug ultra-simplifié
@@ -13,6 +12,8 @@ import core from './FunPlayerCore';
 class LoggingComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       autoScroll: true
@@ -28,7 +29,7 @@ class LoggingComponent extends Component {
   // ============================================================================
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
     this.updateTextarea(); // Charger les logs existants
     this.setupResizeObserver();
   }
@@ -55,8 +56,11 @@ class LoggingComponent extends Component {
     this.resizeObserver = new ResizeObserver(() => {
       // Déclencher resize parent quand la textarea change de taille
       setTimeout(() => {
-        this.props.onResize?.();
-      }, 50);
+        this.core.notify('component:resize', {
+          source: 'LoggingComponent',
+          reason: 'textarea-content-changed'
+        });
+      }, 0);
     });
     
     this.resizeObserver.observe(this.textareaRef.current);
@@ -80,7 +84,7 @@ class LoggingComponent extends Component {
   updateTextarea = () => {
     if (this.textareaRef.current) {
       // Récupère les messages formatés depuis Core
-      this.textareaRef.current.value = core.logging.getFormattedLogs();
+      this.textareaRef.current.value = this.core.logging.getFormattedLogs();
       
       // Auto-scroll si activé
       if (this.state.autoScroll) {
@@ -94,11 +98,11 @@ class LoggingComponent extends Component {
   // ============================================================================
 
   handleClear = () => {
-    core.logging.clear();
+    this.core.logging.clear();
   }
 
   handleDownload = () => {
-    const content = core.generateExportContent();
+    const content = this.core.generateExportContent();
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = `funplayer-debug-${timestamp}.log`;
     
@@ -112,19 +116,19 @@ class LoggingComponent extends Component {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    core.notify?.('status:logging', { message: `Debug logs downloaded: ${filename}`, type: 'success' });
+    this.core.notify?.('status:logging', { message: `Debug logs downloaded: ${filename}`, type: 'success' });
   }
 
   handleCopy = async () => {
     try {
-      const content = core.generateExportContent();
+      const content = this.core.generateExportContent();
       await navigator.clipboard.writeText(content);
-      core.notify?.('status:logging', { message: 'Debug logs copied to clipboard', type: 'success' });
+      this.core.notify?.('status:logging', { message: 'Debug logs copied to clipboard', type: 'success' });
     } catch (error) {
       // Fallback: sélectionner le texte
       if (this.textareaRef.current) {
         this.textareaRef.current.select();
-        core.notify?.('status:logging', { message: 'Logs selected, press Ctrl+C to copy', type: 'info' });
+        this.core.notify?.('status:logging', { message: 'Logs selected, press Ctrl+C to copy', type: 'info' });
       }
     }
   }
@@ -140,26 +144,33 @@ class LoggingComponent extends Component {
   // ============================================================================
 
   render() {
+
+    const { visible = true } = this.props;  // ✅ Défaut visible pour rétrocompatibilité
+  
+    if (!visible) {
+      return null;  // ✅ Plus propre pour un composant debug
+    }
+
     const { autoScroll } = this.state;
-    const logCount = core.logging.getLogs().length;
+    const logCount = this.core.logging.getLogs().length;
     
     return (
-      <div className="fp-debug-container">
+      <div className="fp-logging">
         
-        {/* Header simple sans expansion */}
-        <div className="fp-debug-header">
-          <div className="fp-debug-title">
-            <span style={{ marginRight: '8px' }}>📋</span>
-            <span>Debug Logs</span>
-            <span className="fp-badge">
-              {logCount}
-            </span>
+        {/* Header avec titre et actions */}
+        <div className="fp-logging-header">
+          
+          {/* Zone titre */}
+          <div className="fp-logging-title">
+            <span className="fp-logging-icon">📋</span>
+            <span className="fp-logging-label">Debug Logs</span>
+            <span className="fp-logging-count">{logCount}</span>
           </div>
           
-          {/* Barre d'outils intégrée dans le header */}
-          <div className="fp-debug-actions">
+          {/* Zone actions */}
+          <div className="fp-logging-actions">
             <button 
-              className="fp-btn fp-btn-ghost fp-btn-sm"
+              className="fp-logging-clear-btn"
               onClick={this.handleClear}
               title="Clear logs"
             >
@@ -167,7 +178,7 @@ class LoggingComponent extends Component {
             </button>
             
             <button 
-              className="fp-btn fp-btn-ghost fp-btn-sm"
+              className="fp-logging-download-btn"
               onClick={this.handleDownload}
               title="Download logs"
             >
@@ -175,7 +186,7 @@ class LoggingComponent extends Component {
             </button>
             
             <button 
-              className="fp-btn fp-btn-ghost fp-btn-sm"
+              className="fp-logging-copy-btn"
               onClick={this.handleCopy}
               title="Copy to clipboard"
             >
@@ -183,19 +194,20 @@ class LoggingComponent extends Component {
             </button>
             
             <button 
-              className={`fp-btn fp-btn-ghost fp-btn-sm ${autoScroll ? 'fp-btn-active' : ''}`}
+              className={`fp-logging-autoscroll-btn ${autoScroll ? 'fp-logging-autoscroll-btn-active' : ''}`}
               onClick={this.handleToggleAutoScroll}
               title="Toggle auto-scroll"
             >
               {autoScroll ? '📌' : '🔓'}
             </button>
           </div>
+          
         </div>
         
-        {/* Zone de logs - toujours visible */}
+        {/* Zone de logs */}
         <textarea
           ref={this.textareaRef}
-          className="fp-debug-textarea"
+          className="fp-logging-textarea"
           readOnly
           placeholder="Debug logs will appear here..."
         />

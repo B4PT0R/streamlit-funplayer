@@ -1,18 +1,19 @@
 import React, { Component } from 'react';
-import core from './FunPlayerCore';
 
 /**
  * ActuatorSettingsComponent - ✅ NETTOYÉ: UI pure sans notifications
  * 
  * RESPONSABILITÉS SIMPLIFIÉES:
  * - UI pure pour un actuateur (instance passée en props)
- * - Appels directs core.xxx (pas d'indirections)
+ * - Appels directs this.core.xxx (pas d'indirections)
  * - Re-render uniquement sur événements concernant CET actuateur
  * - ✅ CLEAN: Pas de notifications status (c'est aux managers de le faire)
  */
 class ActuatorSettingsComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       isExpanded: false,
@@ -23,7 +24,7 @@ class ActuatorSettingsComponent extends Component {
   }
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
@@ -83,7 +84,12 @@ class ActuatorSettingsComponent extends Component {
 
   handleToggleExpanded = () => {
     this.setState({ isExpanded: !this.state.isExpanded }, () => {
-      this.props.onResize?.();
+      // ✅ ANCIEN: this.props.onResize?.();
+      // ✅ NOUVEAU: Bus d'événements avec index actuator
+      this.core.notify('component:resize', {
+        source: 'ActuatorSettingsComponent',
+        reason: `actuator-${this.props.actuator?.index}-${this.state.isExpanded ? 'expanded' : 'collapsed'}`
+      });
     });
   }
 
@@ -93,7 +99,7 @@ class ActuatorSettingsComponent extends Component {
 
   handleGlobalScaleChange = (scale) => {
     // Appel direct core - la notification sera faite par ButtPlugManager
-    core.buttplug.setGlobalScale(scale);
+    this.core.buttplug.setGlobalScale(scale);
   }
 
   handleActuatorSettingChange = (key, value) => {
@@ -113,7 +119,7 @@ class ActuatorSettingsComponent extends Component {
       actuator.unplug();
     } else {
       // Appel direct core + instance - la notification sera faite par Channel
-      const channel = core.funscript.getChannel(channelName);
+      const channel = this.core.funscript.getChannel(channelName);
       if (channel) {
         channel.plug(actuator);
       }
@@ -121,19 +127,30 @@ class ActuatorSettingsComponent extends Component {
   }
 
   // ============================================================================
-  // RENDER SIMPLIFIÉ - Accès direct aux données via core + props
+  // RENDER PRINCIPAL - Structure simplifiée
   // ============================================================================
+  render() {
+    return (
+      <div className="fp-actuator-settings">
+        {this.renderCompactLine()}
+        {this.renderExpandedSettings()}
+      </div>
+    );
+  }
 
+  // ============================================================================
+  // LIGNE COMPACTE - Suppression du sur-nesting fp-expandable > fp-compact-line
+  // ============================================================================
   renderCompactLine() {
     const { actuator } = this.props;
     const { isExpanded } = this.state;
     
     if (!actuator) {
-      return <div className="fp-compact-line">No actuator provided</div>;
+      return <div className="fp-actuator-settings-error">No actuator provided</div>;
     }
     
     // Accès direct core pour canaux compatibles
-    const allChannels = core.funscript.getChannels();
+    const allChannels = this.core.funscript.getChannels();
     const compatibleChannels = allChannels.filter(channel => 
       channel.canPlugTo(actuator)
     );
@@ -161,15 +178,15 @@ class ActuatorSettingsComponent extends Component {
     }
     
     return (
-      <div className="fp-compact-line">
+      <div className="fp-actuator-settings-header">
         
         {/* Nom actuateur avec indicateur de statut */}
-        <span className={`fp-badge fp-no-shrink ${!actuator.settings.enabled ? 'fp-disabled' : ''}`}>
+        <span className={`fp-actuator-settings-badge ${!actuator.settings.enabled ? 'fp-actuator-settings-badge-disabled' : ''}`}>
           #{actuator.index} ({actuator.capability})
           {!actuator.settings.enabled && (
             <span 
+              className="fp-actuator-settings-warning"
               title={usabilityMessage}
-              style={{ marginLeft: '4px', opacity: 0.7 }}
             >
               ⚠️
             </span>
@@ -177,9 +194,9 @@ class ActuatorSettingsComponent extends Component {
         </span>
         
         {/* Enable toggle */}
-        <label className="fp-toggle">
+        <label className="fp-actuator-settings-enable-toggle">
           <input
-            className="fp-checkbox"
+            className="fp-actuator-settings-enable-checkbox"
             type="checkbox"
             checked={actuator.settings.enabled}
             onChange={(e) => this.handleActuatorSettingChange('enabled', e.target.checked)}
@@ -189,7 +206,7 @@ class ActuatorSettingsComponent extends Component {
         
         {/* Sélecteur canaux compatibles */}
         <select
-          className="fp-input fp-select fp-flex"
+          className="fp-actuator-settings-channel-select"
           value={assignedChannel?.name || ''}
           onChange={(e) => this.handleChannelMapping(e.target.value)}
           disabled={!actuator.settings.enabled}
@@ -208,7 +225,7 @@ class ActuatorSettingsComponent extends Component {
         
         {/* Expand toggle */}
         <button 
-          className="fp-btn fp-btn-ghost fp-chevron"
+          className="fp-actuator-settings-expand-toggle"
           onClick={this.handleToggleExpanded}
         >
           {isExpanded ? '▲' : '▼'}
@@ -218,6 +235,9 @@ class ActuatorSettingsComponent extends Component {
     );
   }
 
+  // ============================================================================
+  // SETTINGS EXPANDUS - Suppression du sur-nesting fp-expanded > fp-layout-column
+  // ============================================================================
   renderExpandedSettings() {
     if (!this.state.isExpanded) return null;
     
@@ -226,95 +246,78 @@ class ActuatorSettingsComponent extends Component {
     if (!actuator) return null;
     
     // Accès direct core pour canaux compatibles
-    const allChannels = core.funscript.getChannels();
+    const allChannels = this.core.funscript.getChannels();
     const compatibleChannels = allChannels.filter(channel => 
       channel.canPlugTo(actuator)
     );
-  
-    
+
     return (
-      <div className="fp-expanded fp-layout-column fp-layout-compact">
+      <div className="fp-actuator-settings-expanded">
         
         {/* Message de diagnostic si pas utilisable */}
         {!actuator.settings.enabled && allChannels.length === 0 && (
-          <div className="fp-warning" style={{ 
-            padding: 'calc(var(--spacing) * 0.5)', 
-            background: 'rgba(255, 193, 7, 0.1)', 
-            border: '1px solid rgba(255, 193, 7, 0.3)', 
-            borderRadius: 'calc(var(--base-radius) * 0.5)',
-            fontSize: '0.75rem',
-            color: 'var(--text-color)',
-            opacity: '0.8'
-          }}>
+          <div className="fp-actuator-settings-warning-message">
             📄 Load a funscript first
           </div>
         )}
         
         {/* Info sur les canaux compatibles si utilisable */}
         {actuator.settings.enabled && compatibleChannels.length > 0 && (
-          <div className="fp-info" style={{ 
-            fontSize: '0.7rem', 
-            opacity: '0.7',
-            marginBottom: 'calc(var(--spacing) * 0.5)'
-          }}>
+          <div className="fp-actuator-settings-compatibility-info">
             Compatible with {compatibleChannels.length} channel(s): {compatibleChannels.map(ch => ch.name).join(', ')}
           </div>
         )}
         
-        {/* Scale */}
-        <div className="fp-layout-column">
-          <label className="fp-label">
-            Scale: {((actuator.settings.scale || 1) * 100).toFixed(0)}%
-          </label>
-          <input
-            className="fp-input fp-range"
-            type="range"
-            min="0"
-            max="2"
-            step="0.01"
-            value={actuator.settings.scale || 1}
-            onChange={(e) => this.handleActuatorSettingChange('scale', parseFloat(e.target.value))}
-            disabled={!actuator.settings.enabled}
-          />
-        </div>
+        {/* Scale + Offset en horizontal */}
+        <div className="fp-actuator-settings-controls">
+          
+          {/* Scale */}
+          <div className="fp-actuator-settings-scale-control">
+            <label className="fp-actuator-settings-scale-label">
+              Scale: {((actuator.settings.scale || 1) * 100).toFixed(0)}%
+            </label>
+            <input
+              className="fp-actuator-settings-scale-range"
+              type="range"
+              min="0"
+              max="2"
+              step="0.01"
+              value={actuator.settings.scale || 1}
+              onChange={(e) => this.handleActuatorSettingChange('scale', parseFloat(e.target.value))}
+              disabled={!actuator.settings.enabled}
+            />
+          </div>
 
-        {/* Time Offset */}
-        <div className="fp-layout-column">
-          <label className="fp-label">
-            Time Offset: {((actuator.settings.timeOffset || 0) * 1000).toFixed(0)}ms
-          </label>
-          <input
-            className="fp-input fp-range"
-            type="range"
-            min="-0.5"
-            max="0.5"
-            step="0.001"
-            value={actuator.settings.timeOffset || 0}
-            onChange={(e) => this.handleActuatorSettingChange('timeOffset', parseFloat(e.target.value))}
-            disabled={!actuator.settings.enabled}
-          />
+          {/* Time Offset */}
+          <div className="fp-actuator-settings-offset-control">
+            <label className="fp-actuator-settings-offset-label">
+              Time Offset: {((actuator.settings.timeOffset || 0) * 1000).toFixed(0)}ms
+            </label>
+            <input
+              className="fp-actuator-settings-offset-range"
+              type="range"
+              min="-0.5"
+              max="0.5"
+              step="0.001"
+              value={actuator.settings.timeOffset || 0}
+              onChange={(e) => this.handleActuatorSettingChange('timeOffset', parseFloat(e.target.value))}
+              disabled={!actuator.settings.enabled}
+            />
+          </div>
+          
         </div>
 
         {/* Invert */}
-        <label className="fp-toggle">
+        <label className="fp-actuator-settings-invert-toggle">
           <input
-            className="fp-checkbox"
+            className="fp-actuator-settings-invert-checkbox"
             type="checkbox"
             checked={actuator.settings.invert || false}
             onChange={(e) => this.handleActuatorSettingChange('invert', e.target.checked)}
             disabled={!actuator.settings.enabled}
           />
-          <span className="fp-label">Invert Values</span>
+          <span className="fp-actuator-settings-invert-label">Invert Values</span>
         </label>        
-      </div>
-    );
-  }
-
-  render() {
-    return (
-      <div className="fp-expandable">
-        {this.renderCompactLine()}
-        {this.renderExpandedSettings()}
       </div>
     );
   }

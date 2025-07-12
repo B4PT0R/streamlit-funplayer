@@ -6,13 +6,15 @@ import core from './FunPlayerCore';
  * 
  * RESPONSABILITÉS SIMPLIFIÉES:
  * - UI pure pour la playlist (uniquement si > 1 item)
- * - Appels directs core.xxx (pas d'indirections)
+ * - Appels directs this.core.xxx (pas d'indirections)
  * - Re-render sur événements choisis uniquement
  * - ✅ PLUS DE: getters redondants, logique business dans event handlers
  */
 class PlaylistComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       renderTrigger: 0
@@ -22,7 +24,17 @@ class PlaylistComponent extends Component {
   }
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
+  }
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.visible !== this.props.visible) {
+      const reason = this.props.visible ? 'shown' : 'hidden';
+      this.core.notify('component:resize', {
+        source: 'PlaylistComponent',
+        reason: `visibility-${reason}`
+      });
+    }
   }
 
   componentWillUnmount() {
@@ -44,7 +56,10 @@ class PlaylistComponent extends Component {
     
     if (eventsToReact.includes(event)) {
       this._triggerRender();
-      this.props.onResize?.();
+      this.core.notify('component:resize', {
+        source: 'PlaylistComponent',
+        reason: event === 'playlist:loaded' ? 'playlist-loaded' : 'item-changed'
+      });
     }
   }
 
@@ -60,7 +75,7 @@ class PlaylistComponent extends Component {
 
   handleItemClick = (index) => {
     // ✅ BON: Appel direct core
-    const success = core.playlist.goTo(index);
+    const success = this.core.playlist.goTo(index);
     
     if (!success) {
       console.error('PlaylistComponent: Failed to go to item', index);
@@ -145,13 +160,19 @@ class PlaylistComponent extends Component {
   }
 
   // ============================================================================
-  // ✅ RENDER SIMPLIFIÉ - Accès direct aux données via core
+  // RENDER 
   // ============================================================================
 
   render() {
+    const { visible = true } = this.props;
+  
+    if (!visible) {
+      return null;
+    }
+
     // ✅ BON: Accès direct core pour toutes les données
-    const playlist = core.playlist.items;
-    const currentIndex = core.playlist.getCurrentIndex();
+    const playlist = this.core.playlist.items;
+    const currentIndex = this.core.playlist.getCurrentIndex();
 
     // ✅ OPTIMISATION: Ne s'afficher que si playlist > 1
     if (playlist.length <= 1) {
@@ -159,11 +180,13 @@ class PlaylistComponent extends Component {
     }
 
     return (
-      <div className="fp-playlist-column">
+      <div className="fp-playlist">
         
         {/* Header simple */}
         <div className="fp-playlist-header">
-          <span className="fp-label">Playlist ({playlist.length})</span>
+          <span className="fp-playlist-title">
+            Playlist ({playlist.length})
+          </span>
         </div>
 
         {/* Liste des items */}
@@ -171,18 +194,18 @@ class PlaylistComponent extends Component {
           {playlist.map((item, index) => (
             <div
               key={index}
-              className={`fp-playlist-item ${index === currentIndex ? 'active' : ''}`}
+              className={`fp-playlist-item ${index === currentIndex ? 'fp-playlist-item-active' : ''}`}
               onClick={() => this.handleItemClick(index)}
               title={item.description || this.getItemTitle(item, index)}
             >
               
-              {/* ✅ Thumbnail utilise directement item.poster (généré par PlaylistManager) */}
-              <div className="fp-item-thumbnail">
+              {/* Thumbnail */}
+              <div className="fp-playlist-item-thumbnail">
                 <img 
-                  src={item.poster} // ✅ Toujours défini par PlaylistManager
+                  className="fp-playlist-item-image"
+                  src={item.poster}
                   alt={this.getItemTitle(item, index)}
                   onError={(e) => { 
-                    // ✅ Fallback d'urgence si même le SVG échoue
                     e.target.style.display = 'none';
                     e.target.parentElement.innerHTML = '📄';
                   }}
@@ -190,16 +213,18 @@ class PlaylistComponent extends Component {
               </div>
               
               {/* Contenu texte */}
-              <div className="fp-item-content">
+              <div className="fp-playlist-item-content">
+                
                 {/* Titre de l'item */}
-                <div className="fp-item-title">
+                <div className="fp-playlist-item-title">
                   {this.getItemTitle(item, index)}
                 </div>
                 
                 {/* Infos de l'item */}
-                <div className="fp-item-info">
+                <div className="fp-playlist-item-info">
                   {this.getItemInfo(item)}
                 </div>
+                
               </div>
               
             </div>

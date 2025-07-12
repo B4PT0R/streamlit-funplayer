@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FunPlayer WebComponent - Test Styles</title>
+  <style>
+    /* Styles de la page hôte pour contraste */
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+      color: #333;
+    }
+    
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .test-section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      background: #fafafa;
+    }
+    
+    .test-section h3 {
+      margin-top: 0;
+      color: #ff4b4b;
+      border-bottom: 2px solid #ff4b4b;
+      padding-bottom: 10px;
+    }
+    
+    /* Styles pour le debug */
+    .debug-info {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 5px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      margin: 15px 0;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    
+    .controls {
+      margin: 15px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      padding: 8px 16px;
+      border: 1px solid #ff4b4b;
+      background: white;
+      color: #ff4b4b;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: #ff4b4b;
+      color: white;
+    }
+    
+    /* Marquer clairement la zone du WebComponent */
+    fun-player {
+      border: 3px solid #ff4b4b;
+      border-radius: 8px;
+      display: block;
+      margin: 20px 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 FunPlayer WebComponent - Test d'injection des styles</h1>
+    <p>Test pour vérifier que les styles sont correctement injectés dans le Shadow DOM</p>
+
+    <!-- ========================================================================== -->
+    <!-- TEST 1: WebComponent basique -->
+    <!-- ========================================================================== -->
+    <div class="test-section">
+      <h3>1. Test basique - Playlist simple</h3>
+      <p>WebComponent avec une playlist de test et thème par défaut</p>
+      
+      <fun-player 
+        id="player1"
+        playlist='[{
+          "sources": [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "type": "video/mp4"}], 
+          "name": "Big Buck Bunny"
+        }]'
+      ></fun-player>
+      
+      <div class="controls">
+        <button onclick="debugPlayer('player1')">🔍 Debug Player 1</button>
+        <button onclick="inspectShadowDOM('player1')">👁️ Inspect Shadow DOM</button>
+        <button onclick="checkStyles('player1')">🎨 Check Styles</button>
+      </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- TEST 2: WebComponent avec thème custom -->
+    <!-- ========================================================================== -->
+    <div class="test-section">
+      <h3>2. Test avec thème custom - Mode sombre</h3>
+      <p>WebComponent avec thème personnalisé pour tester l'injection de variables CSS</p>
+      
+      <fun-player 
+        id="player2"
+        playlist='[{
+          "sources": [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4", "type": "video/mp4"}], 
+          "name": "Elephants Dream"
+        }]'
+        theme='{
+          "base": "dark",
+          "primaryColor": "#00ff88",
+          "backgroundColor": "#1a1a1a",
+          "textColor": "#ffffff",
+          "borderColor": "#444444"
+        }'
+      ></fun-player>
+      
+      <div class="controls">
+        <button onclick="debugPlayer('player2')">🔍 Debug Player 2</button>
+        <button onclick="changeTheme('player2')">🎨 Change Theme</button>
+      </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- TEST 3: Création dynamique -->
+    <!-- ========================================================================== -->
+    <div class="test-section">
+      <h3>3. Test création dynamique via JS</h3>
+      <p>WebComponent créé dynamiquement pour tester l'API FunPlayer.create()</p>
+      
+      <div id="dynamic-container" style="min-height: 300px; background: #f0f0f0; border: 2px dashed #ccc; border-radius: 8px; padding: 20px;">
+        <p style="text-align: center; color: #666;">Zone pour le player dynamique</p>
+      </div>
+      
+      <div class="controls">
+        <button onclick="createDynamicPlayer()">➕ Créer Player Dynamique</button>
+        <button onclick="removeDynamicPlayer()">❌ Supprimer Player</button>
+      </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- DEBUG GLOBAL -->
+    <!-- ========================================================================== -->
+    <div class="test-section">
+      <h3>4. Debug global</h3>
+      <div class="controls">
+        <button onclick="globalDebug()">🔍 Debug Global</button>
+        <button onclick="listAllPlayers()">📋 List All Players</button>
+        <button onclick="testAPI()">⚡ Test API</button>
+        <button onclick="clearDebug()">🧹 Clear Debug</button>
+      </div>
+      
+      <div id="debug-output" class="debug-info">
+        📊 Debug output will appear here...
+        
+        Click buttons above to run various tests and diagnostics.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Point d'entrée pour le Web Component -->
+  <script type="module" src="/src/embed.js"></script>
+  
+  <script>
+    // ============================================================================
+    // FONCTIONS DE DEBUG ET TEST
+    // ============================================================================
+    
+    let debugElement = null;
+    
+    function getDebugElement() {
+      if (!debugElement) {
+        debugElement = document.getElementById('debug-output');
+      }
+      return debugElement;
+    }
+    
+    function log(message) {
+      const debug = getDebugElement();
+      const timestamp = new Date().toLocaleTimeString();
+      debug.textContent += `\n[${timestamp}] ${message}`;
+      debug.scrollTop = debug.scrollHeight;
+    }
+    
+    function clearDebug() {
+      const debug = getDebugElement();
+      debug.textContent = '📊 Debug cleared...\n';
+    }
+    
+    // ============================================================================
+    // TESTS SPÉCIFIQUES AUX PLAYERS
+    // ============================================================================
+    
+    function debugPlayer(playerId) {
+      const player = document.getElementById(playerId);
+      if (!player) {
+        log(`❌ Player ${playerId} not found`);
+        return;
+      }
+      
+      log(`🔍 Debugging player: ${playerId}`);
+      log(`- tagName: ${player.tagName}`);
+      log(`- shadowRoot: ${!!player.shadowRoot}`);
+      log(`- playlist: ${player.getAttribute('playlist')?.substring(0, 50)}...`);
+      log(`- theme: ${player.getAttribute('theme') || 'default'}`);
+      
+      if (player.shadowRoot) {
+        log(`- shadowRoot children: ${player.shadowRoot.children.length}`);
+        log(`- styles in shadowRoot: ${player.shadowRoot.querySelectorAll('style').length}`);
+      }
+    }
+    
+    function inspectShadowDOM(playerId) {
+      const player = document.getElementById(playerId);
+      if (!player || !player.shadowRoot) {
+        log(`❌ No shadow DOM found for ${playerId}`);
+        return;
+      }
+      
+      log(`👁️ Shadow DOM contents for ${playerId}:`);
+      
+      Array.from(player.shadowRoot.children).forEach((child, index) => {
+        log(`  [${index}] ${child.tagName}${child.className ? '.' + child.className : ''}`);
+        
+        if (child.tagName === 'STYLE') {
+          const cssLength = child.textContent.length;
+          log(`    └─ CSS length: ${cssLength} characters`);
+          
+          // Analyser le contenu CSS
+          const css = child.textContent;
+          const hasVideoJS = css.includes('video-js');
+          const hasFunPlayer = css.includes('.fp-');
+          const hasVariables = css.includes('--primary-color');
+          
+          log(`    └─ Contains video.js: ${hasVideoJS}`);
+          log(`    └─ Contains FunPlayer classes: ${hasFunPlayer}`);
+          log(`    └─ Contains CSS variables: ${hasVariables}`);
+        }
+      });
+    }
+    
+    function checkStyles(playerId) {
+      const player = document.getElementById(playerId);
+      if (!player) {
+        log(`❌ Player ${playerId} not found`);
+        return;
+      }
+      
+      log(`🎨 Style check for ${playerId}:`);
+      
+      // Vérifier les variables CSS sur l'host
+      const style = window.getComputedStyle(player);
+      const primaryColor = style.getPropertyValue('--primary-color');
+      const backgroundColor = style.getPropertyValue('--background-color');
+      
+      log(`- Host --primary-color: ${primaryColor || 'not set'}`);
+      log(`- Host --background-color: ${backgroundColor || 'not set'}`);
+      
+      // Vérifier dans le shadow DOM
+      if (player.shadowRoot) {
+        const container = player.shadowRoot.querySelector('.funplayer-shadow-container');
+        if (container) {
+          const containerStyle = window.getComputedStyle(container);
+          log(`- Container background: ${containerStyle.backgroundColor}`);
+          log(`- Container color: ${containerStyle.color}`);
+        }
+      }
+    }
+    
+    // ============================================================================
+    // TESTS DYNAMIQUES
+    // ============================================================================
+    
+    function createDynamicPlayer() {
+      const container = document.getElementById('dynamic-container');
+      
+      // Nettoyer le contenu existant
+      container.innerHTML = '';
+      
+      try {
+        if (window.FunPlayer && window.FunPlayer.create) {
+          log('➕ Creating dynamic player with FunPlayer.create()');
+          
+          const player = window.FunPlayer.create(container, {
+            playlist: [{
+              sources: [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4", "type": "video/mp4"}],
+              name: "Sintel (Dynamic)"
+            }],
+            theme: {
+              primaryColor: "#ff6b6b",
+              backgroundColor: "#f8f9fa"
+            },
+            onPlay: () => log('🎵 Dynamic player: PLAY event'),
+            onPause: () => log('⏸️ Dynamic player: PAUSE event')
+          });
+          
+          player.id = 'dynamic-player';
+          log('✅ Dynamic player created successfully');
+          
+        } else {
+          log('❌ FunPlayer.create() not available. Check if embed.js loaded correctly.');
+        }
+      } catch (error) {
+        log(`❌ Error creating dynamic player: ${error.message}`);
+      }
+    }
+    
+    function removeDynamicPlayer() {
+      const container = document.getElementById('dynamic-container');
+      container.innerHTML = '<p style="text-align: center; color: #666;">Zone pour le player dynamique</p>';
+      log('🗑️ Dynamic player removed');
+    }
+    
+    function changeTheme(playerId) {
+      const player = document.getElementById(playerId);
+      if (!player) return;
+      
+      const themes = [
+        { primaryColor: "#ff4b4b", backgroundColor: "#ffffff", base: "light" },
+        { primaryColor: "#00ff88", backgroundColor: "#1a1a1a", base: "dark" },
+        { primaryColor: "#8b5cf6", backgroundColor: "#f3f4f6", base: "light" },
+        { primaryColor: "#f59e0b", backgroundColor: "#111827", base: "dark" }
+      ];
+      
+      const randomTheme = themes[Math.floor(Math.random() * themes.length)];
+      player.setAttribute('theme', JSON.stringify(randomTheme));
+      
+      log(`🎨 Theme changed for ${playerId}: ${randomTheme.primaryColor}`);
+    }
+    
+    // ============================================================================
+    // TESTS GLOBAUX
+    // ============================================================================
+    
+    function globalDebug() {
+      log('🔍 Global Debug Info:');
+      log(`- CustomElements supported: ${!!window.customElements}`);
+      log(`- FunPlayer namespace: ${!!window.FunPlayer}`);
+      
+      if (window.FunPlayer) {
+        log(`- FunPlayer version: ${window.FunPlayer.version}`);
+        log(`- FunPlayer mode: ${window.FunPlayer.mode}`);
+        log(`- Supported events: ${window.FunPlayer.getSupportedEvents().length}`);
+      }
+      
+      // Vérifier l'enregistrement du Web Component
+      const registered = window.customElements.get('fun-player');
+      log(`- <fun-player> registered: ${!!registered}`);
+      
+      // Compter les styles dans le DOM principal
+      const styleTags = document.querySelectorAll('style');
+      const linkTags = document.querySelectorAll('link[rel="stylesheet"]');
+      log(`- <style> tags in main DOM: ${styleTags.length}`);
+      log(`- <link> stylesheets: ${linkTags.length}`);
+      
+      // Analyser le contenu des styles
+      let funplayerStylesFound = 0;
+      let videojsStylesFound = 0;
+      
+      styleTags.forEach(style => {
+        const content = style.textContent || '';
+        if (content.includes('.fp-') || content.includes('funplayer')) {
+          funplayerStylesFound++;
+        }
+        if (content.includes('video-js')) {
+          videojsStylesFound++;
+        }
+      });
+      
+      log(`- FunPlayer styles found: ${funplayerStylesFound}`);
+      log(`- Video.js styles found: ${videojsStylesFound}`);
+    }
+    
+    function listAllPlayers() {
+      const players = document.querySelectorAll('fun-player');
+      log(`📋 Found ${players.length} FunPlayer instance(s):`);
+      
+      players.forEach((player, index) => {
+        const id = player.id || `unnamed-${index}`;
+        const hasPlaylist = !!player.getAttribute('playlist');
+        const hasTheme = !!player.getAttribute('theme');
+        const hasShadowRoot = !!player.shadowRoot;
+        
+        log(`  [${index}] ${id} - playlist:${hasPlaylist} theme:${hasTheme} shadow:${hasShadowRoot}`);
+      });
+    }
+    
+    function testAPI() {
+      log('⚡ Testing FunPlayer API:');
+      
+      if (!window.FunPlayer) {
+        log('❌ window.FunPlayer not available');
+        return;
+      }
+      
+      try {
+        // Test getSupportedEvents
+        const events = window.FunPlayer.getSupportedEvents();
+        log(`✅ getSupportedEvents(): ${events.length} events`);
+        log(`   Events: ${events.join(', ')}`);
+        
+        // Test getEventDocumentation
+        const docs = window.FunPlayer.getEventDocumentation();
+        log(`✅ getEventDocumentation(): ${Object.keys(docs).length} documented events`);
+        
+      } catch (error) {
+        log(`❌ API test failed: ${error.message}`);
+      }
+    }
+    
+    // ============================================================================
+    // INITIALIZATION
+    // ============================================================================
+    
+    // Auto-debug au chargement
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        log('🚀 Page loaded, running initial diagnostics...');
+        globalDebug();
+        listAllPlayers();
+      }, 500);
+    });
+    
+    // Écouter les événements des WebComponents
+    document.addEventListener('funplayer-play', (e) => {
+      log(`🎵 PLAY event from: ${e.target.id || 'unnamed player'}`);
+    });
+    
+    document.addEventListener('funplayer-pause', (e) => {
+      log(`⏸️ PAUSE event from: ${e.target.id || 'unnamed player'}`);
+    });
+    
+    document.addEventListener('funplayer-resize', (e) => {
+      log(`📏 RESIZE event: ${e.detail.width}x${e.detail.height}`);
+    });
+    
+  </script>
+
+</body>
+</html>

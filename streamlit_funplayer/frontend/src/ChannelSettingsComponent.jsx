@@ -1,5 +1,4 @@
 import React, { Component } from 'react';
-import core from './FunPlayerCore';
 
 /**
  * ChannelSettingsComponent - Configuration manuelle des champs d'actions
@@ -13,6 +12,8 @@ import core from './FunPlayerCore';
 class ChannelSettingsComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       isExpanded: false,
@@ -24,7 +25,7 @@ class ChannelSettingsComponent extends Component {
   }
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
@@ -67,7 +68,12 @@ class ChannelSettingsComponent extends Component {
 
   handleToggleExpanded = () => {
     this.setState({ isExpanded: !this.state.isExpanded }, () => {
-      this.props.onResize?.();
+      // ✅ ANCIEN: this.props.onResize?.();
+      // ✅ NOUVEAU: Bus d'événements
+      this.core.notify('component:resize', {
+        source: 'ChannelSettingsComponent',
+        reason: `config-${this.state.isExpanded ? 'expanded' : 'collapsed'}`
+      });
     });
   }
 
@@ -85,9 +91,9 @@ class ChannelSettingsComponent extends Component {
 
   handleValidate = () => {  // Enlever async
     try {
-      const originalData = core.funscript.data;
+      const originalData = this.core.funscript.data;
       if (originalData) {
-        core.funscript.loadWithCustomFieldConfig(originalData, pendingConfig); // Enlever await
+        this.core.funscript.loadWithCustomFieldConfig(originalData, pendingConfig); // Enlever await
         this.setState({ pendingConfig: {}, isExpanded: false });
       }
     } catch (error) {
@@ -101,7 +107,7 @@ class ChannelSettingsComponent extends Component {
 
   getCurrentConfig = (channelName, fieldType) => {
     const { pendingConfig } = this.state;
-    const channel = core.funscript.getChannel(channelName);
+    const channel = this.core.funscript.getChannel(channelName);
     
     // Valeur en cours d'édition ou valeur actuelle du canal
     if (pendingConfig[channelName] && pendingConfig[channelName][fieldType] !== undefined) {
@@ -143,6 +149,92 @@ class ChannelSettingsComponent extends Component {
   // RENDER
   // ============================================================================
 
+  render() {
+    const { isExpanded } = this.state;
+    
+    // Ne s'afficher que si funscript chargé
+    if (!this.core.funscript.hasFunscript()) {
+      return null;
+    }
+    
+    const detectedFields = this.core.funscript.getDetectedFields();
+    const channelCount = Object.keys(detectedFields).length;
+    
+    return (
+      <div className="fp-channel-settings">
+        
+        {/* Header avec toggle - plus de div inutile */}
+        <div className="fp-channel-settings-header">
+          <span className="fp-channel-settings-title">
+            Configure Action Channels ({channelCount})
+          </span>
+          <button
+            className="fp-channel-settings-toggle"
+            onClick={this.handleToggleExpanded}
+          >
+            {isExpanded ? '▲' : '▼'}
+          </button>
+        </div>
+        
+        {/* Zone expandue */}
+        {this.renderExpandedSettings()}
+        
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // SETTINGS EXPANDUS - Suppression du sur-nesting
+  // ============================================================================
+  renderExpandedSettings = () => {
+    if (!this.state.isExpanded) return null;
+    
+    const detectedFields = this.core.funscript.getDetectedFields();
+    const channelNames = Object.keys(detectedFields);
+    
+    if (channelNames.length === 0) {
+      return (
+        <div className="fp-channel-settings-empty">
+          No channels detected. Load a funscript first.
+        </div>
+      );
+    }
+
+    return (
+      <div className="fp-channel-settings-expanded">
+        
+        {/* Config par canal */}
+        {channelNames.map(channelName => 
+          this.renderChannelConfig(channelName, detectedFields[channelName])
+        )}
+        
+        {/* Actions */}
+        <div className="fp-channel-settings-actions">
+          <button 
+            className="fp-channel-settings-validate-btn"
+            onClick={this.handleValidate}
+            disabled={!this.hasPendingChanges()}
+          >
+            ✓ Validate Changes
+          </button>
+          
+          {this.hasPendingChanges() && (
+            <button 
+              className="fp-channel-settings-cancel-btn"
+              onClick={() => this.setState({ pendingConfig: {} })}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+        
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // CONFIG CANAL - Suppression du sur-nesting
+  // ============================================================================
   renderChannelConfig = (channelName, detectedFields) => {
     const fieldTypes = [
       { key: 'timeField', label: 'Time' },
@@ -152,133 +244,40 @@ class ChannelSettingsComponent extends Component {
     ];
 
     return (
-      <div key={channelName} className="fp-layout-column">
+      <div className="fp-channel-settings-channel">
         
-        {/* Header du canal */}
-        <div className="fp-layout-row">
-          <span className="fp-badge fp-no-shrink">{channelName}</span>
-        </div>
+        {/* Nom du canal */}
+        <span className="fp-channel-settings-channel-name">
+          {channelName}
+        </span>
         
-        {/* Config des 4 champs */}
-        <div className="fp-layout-column fp-layout-compact">
-          {fieldTypes.map(({ key, label }) => {
-            const availableFields = this.getAvailableFields(detectedFields, key);
-            const currentValue = this.getCurrentConfig(channelName, key);
-            
-            return (
-              <div key={key} className="fp-layout-row">
-                <label className="fp-label fp-no-shrink" style={{ minWidth: '60px' }}>
-                  {label}:
-                </label>
-                <select
-                  className="fp-input fp-select fp-flex"
-                  value={currentValue}
-                  onChange={(e) => this.handleFieldChange(channelName, key, e.target.value)}
-                >
-                  <option value="none">none</option>
-                  {availableFields.map(field => (
-                    <option key={field} value={field}>{field}</option>
-                  ))}
-                </select>
-              </div>
-            );
-          })}
-        </div>
-        
-      </div>
-    );
-  }
-
-  renderExpandedSettings = () => {
-    if (!this.state.isExpanded) return null;
-    
-    const detectedFields = core.funscript.getDetectedFields();
-    const channelNames = Object.keys(detectedFields);
-    
-    if (channelNames.length === 0) {
-      return (
-        <div className="fp-expanded">
-          <div style={{ 
-            textAlign: 'center', 
-            color: 'var(--text-color)', 
-            opacity: 0.6,
-            padding: 'var(--spacing)' 
-          }}>
-            No channels detected. Load a funscript first.
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div className="fp-expanded">
-        <div className="fp-layout-column">
+        {/* Les 4 champs inline */}
+        {fieldTypes.map(({ key, label }) => {
+          const availableFields = this.getAvailableFields(detectedFields, key);
+          const currentValue = this.getCurrentConfig(channelName, key);
           
-          {/* Config par canal */}
-          {channelNames.map(channelName => 
-            this.renderChannelConfig(channelName, detectedFields[channelName])
-          )}
-          
-          {/* Bouton valider */}
-          <div className="fp-layout-row" style={{ marginTop: 'var(--spacing)' }}>
-            <button 
-              className="fp-btn fp-btn-primary"
-              onClick={this.handleValidate}
-              disabled={!this.hasPendingChanges()}
-            >
-              ✓ Validate Changes
-            </button>
-            
-            {this.hasPendingChanges() && (
-              <button 
-                className="fp-btn fp-btn-ghost"
-                onClick={() => this.setState({ pendingConfig: {} })}
+          return (
+            <div key={key} className="fp-channel-settings-field">
+              <label className="fp-channel-settings-field-label">
+                {label}:
+              </label>
+              <select
+                className="fp-channel-settings-field-select"
+                value={currentValue}
+                onChange={(e) => this.handleFieldChange(channelName, key, e.target.value)}
               >
-                Cancel
-              </button>
-            )}
-          </div>
-          
-        </div>
-      </div>
-    );
-  }
-
-  render() {
-      const { isExpanded } = this.state;
-      
-      // Ne s'afficher que si funscript chargé
-      if (!core.funscript.hasFunscript()) {
-        return null;
-      }
-      
-      const detectedFields = core.funscript.getDetectedFields();
-      const channelCount = Object.keys(detectedFields).length;
-      
-      return (
-        <div className="channel-settings">
-          
-          {/* Bouton discret */}
-          <div className="fp-expandable">
-            {/* ✅ MODIFIÉ: Ajout de fp-justify-between pour pousser le chevron à droite */}
-            <div className="fp-compact-line fp-justify-between">
-              <span className="fp-label">Configure Action Channels ({channelCount})</span>
-              
-              <button
-                className="fp-btn fp-btn-ghost fp-chevron"
-                onClick={this.handleToggleExpanded}
-              >
-                {isExpanded ? '▲' : '▼'}
-              </button>
+                <option value="none">none</option>
+                {availableFields.map(field => (
+                  <option key={field} value={field}>{field}</option>
+                ))}
+              </select>
             </div>
-            
-            {/* Zone expandue */}
-            {this.renderExpandedSettings()}
-          </div>
-          
-        </div>
-      );
-    }
+          );
+        })}
+        
+      </div>
+    );
+  }
 }
 
 export default ChannelSettingsComponent;

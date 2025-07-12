@@ -4,7 +4,10 @@ import PlaylistComponent from './PlaylistComponent';
 import HapticSettingsComponent from './HapticSettingsComponent';
 import HapticVisualizerComponent from './HapticVisualizerComponent';
 import LoggingComponent from './LoggingComponent';
-import core from './FunPlayerCore';
+import StatusBarComponent from './StatusBarComponent';
+import FunPlayerCore from './FunPlayerCore';
+import ThemeUtils from './ThemeUtils';
+import './funplayer.scss';
 
 /**
  * FunPlayer - ✅ REFACTORISÉ: Status notifications uniformisées + callback MediaPlayer
@@ -12,6 +15,8 @@ import core from './FunPlayerCore';
 class FunPlayer extends Component {
   constructor(props) {
     super(props);
+
+    this.core=new FunPlayerCore()
     
     this.state = {
       updateRate: 60,
@@ -22,6 +27,9 @@ class FunPlayer extends Component {
       renderTrigger: 0
     };
     
+
+    // ✅ NOUVEAU: Ref directe sur le container principal
+    this.containerRef = React.createRef();
     this.mediaPlayerRef = React.createRef();
     
     // Haptic loop technique (performance pure)
@@ -81,27 +89,27 @@ class FunPlayer extends Component {
 
   initializeComponent = () => {
     try {
-      core.notify?.('status:funplayer', { message: 'Initializing FunPlayer component...', type: 'processing' });
+      this.core.notify?.('status:funplayer', { message: 'Initializing FunPlayer component...', type: 'processing' });
       
-      this.coreListener = core.addListener(this.handleEvent);
+      this.coreListener = this.core.addListener(this.handleEvent);
       
       if (this.props.playlist) {
         this.handlePlaylistUpdate();
       }
       
-      core.notify?.('status:funplayer', { message: 'FunPlayer component initialized', type: 'success' });
+      this.core.notify?.('status:funplayer', { message: 'FunPlayer component initialized', type: 'success' });
       
     } catch (error) {
-      core.notify?.('status:funplayer', { message: 'FunPlayer initialization failed', type: 'error', error: error.message });
+      this.core.notify?.('status:funplayer', { message: 'FunPlayer initialization failed', type: 'error', error: error.message });
     }
   }
 
   handlePlaylistUpdate = async () => {
     const { playlist } = this.props;
     
-    core.notify?.('status:funplayer', { message: `Synchronizing playlist: ${playlist?.length || 0} items`, type: 'log' });
+    this.core.notify?.('status:funplayer', { message: `Synchronizing playlist: ${playlist?.length || 0} items`, type: 'log' });
     
-    await core.playlist.loadPlaylist(playlist);
+    await this.core.playlist.loadPlaylist(playlist);
   }
 
   // ============================================================================
@@ -112,34 +120,26 @@ class FunPlayer extends Component {
     const { theme } = this.props;
     if (!theme) return;
 
-    const element = document.querySelector('.fun-player') || 
-                   document.documentElement;
-
-    Object.entries(theme).forEach(([key, value]) => {
-      const cssVar = this.convertToCssVar(key);
-      element.style.setProperty(cssVar, value);
-    });
-
-    if (theme.base) {
-      element.setAttribute('data-theme', theme.base);
+    // ✅ SIMPLIFIÉ: Utilisation de ThemeUtils.applyThemeToElement
+    const element = this.containerRef.current;
+    if (!element) {
+      console.warn('Cannot apply theme: container ref not available');
+      return;
     }
 
-    core.notify?.('status:funplayer', { message: 'Theme applied successfully', type: 'log' });
-  }
-
-  convertToCssVar = (key) => {
-    const mappings = {
-      'primaryColor': '--primary-color',
-      'backgroundColor': '--background-color',
-      'secondaryBackgroundColor': '--secondary-background-color', 
-      'textColor': '--text-color',
-      'borderColor': '--border-color',
-      'fontFamily': '--font-family',
-      'baseRadius': '--base-radius',
-      'spacing': '--spacing'
-    };
+    const success = ThemeUtils.applyThemeToElement(theme, element);
     
-    return mappings[key] || `--${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+    if (success) {
+      this.core.notify?.('status:funplayer', { 
+        message: 'Theme applied successfully with fp- prefixed variables', 
+        type: 'log' 
+      });
+    } else {
+      this.core.notify?.('status:funplayer', { 
+        message: 'Failed to apply theme', 
+        type: 'error' 
+      });
+    }
   }
 
   // ============================================================================
@@ -148,8 +148,116 @@ class FunPlayer extends Component {
 
   handleEvent = (event, data) => {
     switch (event) {
+      // ============================================================================
+      // MEDIA EVENTS - Router vers handlers internes (noms harmonisés)
+      // ============================================================================
+      case 'media:play':
+        this.handleMediaPlayEvent(data);
+        break;
+      case 'media:pause':
+        this.handleMediaPauseEvent(data);
+        break;
+      case 'media:ended':
+        this.handleMediaEndedEvent(data);
+        break;
+        
+      // ✅ CORRIGÉ: seeking/seeked (événements natifs Video.js)
+      case 'media:seeking':
+        this.handleMediaSeekingEvent(data);
+        break;
+      case 'media:seeked':
+        this.handleMediaSeekedEvent(data);
+        break;
+        
+      // Time events
+      case 'media:timeupdate':
+        this.handleMediaTimeUpdateEvent(data);
+        break;
+      case 'media:durationchange':
+        this.handleMediaDurationChangeEvent(data);
+        break;
+        
+      // Loading events
+      case 'media:loadstart':
+        this.handleMediaLoadStartEvent(data);
+        break;
+      case 'media:loadeddata':
+        this.handleMediaLoadedDataEvent(data);
+        break;
+      case 'media:loadedmetadata':
+        this.handleMediaLoadedMetadataEvent(data);
+        break;
+      case 'media:canplay':
+        this.handleMediaCanPlayEvent(data);
+        break;
+      case 'media:canplaythrough':
+        this.handleMediaCanPlayThroughEvent(data);
+        break;
+        
+      // Buffering events
+      case 'media:waiting':
+        this.handleMediaWaitingEvent(data);
+        break;
+      case 'media:stalled':
+        this.handleMediaStalledEvent(data);
+        break;
+      case 'media:suspend':
+        this.handleMediaSuspendEvent(data);
+        break;
+        
+      // Volume events
+      case 'media:volumechange':
+        this.handleMediaVolumeChangeEvent(data);
+        break;
+        
+      // Error events
+      case 'media:error':
+        this.handleMediaErrorEvent(data);
+        break;
+        
+      // Playlist events
+      case 'media:playlistitemchange':
+        this.handleMediaPlaylistItemChangeEvent(data);
+        break;
+        
+      // Size events
+      case 'media:resize':
+        this.handleMediaResizeEvent(data);
+        break;
+
+      // ============================================================================
+      // FUNPLAYER SPECIFIC EVENTS
+      // ============================================================================
+      case 'buttplug:device':
+        if (data.connected !== false) {
+          this.handleDeviceConnect(data);
+        } else {
+          this.handleDeviceDisconnect(data);
+        }
+        this._triggerRender();
+        break;
+        
+      case 'buttplug:connection':
+        if (data.connected === false && data.reason) {
+          const disconnectData = { device: { name: 'All devices' }, reason: data.reason };
+          this.handleDeviceDisconnect(disconnectData);
+        }
+        this._triggerRender();
+        break;
+        
+      case 'haptic:started':
+        this.handleHapticStart(data);
+        break;
+        
+      case 'haptic:stopped':
+        this.handleHapticStop(data);
+        break;
+
+      // ============================================================================
+      // OTHER EVENTS
+      // ============================================================================
       case 'core:ready':
-        core.notify('status:funplayer',{message:'Core systems ready', type:'success'});
+        this.core.notify('status:funplayer',{message:'Core systems ready', type:'success'});
         this._triggerRender();
         break;
         
@@ -157,22 +265,27 @@ class FunPlayer extends Component {
         this.setState({ isPlaying: data.isPlaying });
         break;
 
-      // ✅ AJOUT: Synchroniser MediaPlayer quand PlaylistManager change d'item
       case 'playlist:itemChanged':
         if (this.mediaPlayerRef.current && data.index >= 0) {
-          // Vérifier si MediaPlayer n'est pas déjà sur le bon item
           const currentMediaPlayerIndex = this.mediaPlayerRef.current.getPlaylistInfo().currentIndex;
-          
           if (currentMediaPlayerIndex !== data.index) {
-            core.notify?.('status:funplayer', { 
+            this.core.notify?.('status:funplayer', { 
               message: `Syncing MediaPlayer: ${currentMediaPlayerIndex} → ${data.index}`, 
               type: 'log' 
             });
-            
             this.mediaPlayerRef.current.goToPlaylistItem(data.index);
           }
         }
         break;
+        
+      case 'funscript:load':
+      case 'funscript:channels':
+        this._triggerRender();
+        break;
+
+      case 'component:resize':
+        this.handleResize(data);
+        break
     }
   }
 
@@ -183,11 +296,186 @@ class FunPlayer extends Component {
   }
 
   // ============================================================================
+  // MAIN API CALLBACKS
+  // ============================================================================
+
+  handleResize = (data) => {
+    const element = this.containerRef.current;
+    
+    if (!element) {
+      console.warn('📏 FunPlayer container ref not available');
+      return;
+    }
+
+    // ✅ Mesure des dimensions réelles
+    const dimensions = {
+      width: element.offsetWidth,
+      height: element.scrollHeight
+    };
+    
+    // ✅ Logging avec fallbacks pour rétrocompatibilité
+    if (data && typeof data === 'object') {
+      // Nouveau système: data fourni via bus d'événements
+      const source = data.source || 'unknown';
+      const reason = data.reason ? ` (${data.reason})` : '';
+      
+      this.core.notify?.('status:funplayer', { 
+        message: `Resize from ${source}${reason}: ${dimensions.width}×${dimensions.height}px`, 
+        type: 'log' 
+      });
+    } else {
+      // Ancien système: appel direct sans contexte
+      this.core.notify?.('status:funplayer', { 
+        message: `Resize (legacy call): ${dimensions.width}×${dimensions.height}px`, 
+        type: 'log' 
+      });
+    }
+    
+    // ✅ Propager vers l'hôte (Streamlit/Web Component)
+    this.props.onResize?.(dimensions);
+  }
+
+  // Device Events (logique déjà dans ButtPlugManager)
+  handleDeviceConnect = (data) => {
+    // ✅ Trace pour uniformité/debug (pas d'echo au bus)
+    this.core.notify?.('status:funplayer', { 
+      message: `Device connected: ${data.device?.name || 'Unknown'}`, 
+      type: 'log' 
+    });
+    this.props.onDeviceConnect?.(data);
+  }
+
+  handleDeviceDisconnect = (data) => {
+    // ✅ Trace pour uniformité/debug (pas d'echo au bus)
+    this.core.notify?.('status:funplayer', { 
+      message: `Device disconnected: ${data.device?.name || 'Unknown'}`, 
+      type: 'log' 
+    });
+    this.props.onDeviceDisconnect?.(data);
+  }
+
+  // Haptic Events (logique déjà dans boucle haptique)
+  handleHapticStart = (data) => {
+    // ✅ Trace pour uniformité/debug (pas d'echo au bus)
+    this.core.notify?.('status:funplayer', { 
+      message: `Haptic playback started: ${data.channels} channels at ${data.updateRate}Hz`, 
+      type: 'log' 
+    });
+    this.props.onHapticStart?.(data);
+  }
+
+  handleHapticStop = (data) => {
+    // ✅ Trace pour uniformité/debug (pas d'echo au bus)
+    this.core.notify?.('status:funplayer', { 
+      message: `Haptic playback stopped: ${data.reason}`, 
+      type: 'log' 
+    });
+    this.props.onHapticStop?.(data);
+  }
+
+  // ============================================================================
   // MEDIA PLAYER CALLBACKS
   // ============================================================================
 
-  // Groupe 1: Callbacks haptiques (timing critique)
-  handleMediaPlay = ({ currentTime }) => {
+  handleMediaPlay = (data) => {
+    this.core.notify("media:play", data);
+    this.props.onPlay?.(data);
+  }
+
+  handleMediaPause = (data) => {
+    this.core.notify("media:pause", data);
+    this.props.onPause?.(data);
+  }
+
+  handleMediaEnded = (data) => {
+    this.core.notify("media:ended", data);
+    this.props.onEnded?.(data);
+  }
+
+  handleMediaSeeking = (data) => {
+    this.core.notify("media:seeking", data);
+    this.props.onSeeking?.(data);
+  }
+
+  handleMediaSeeked = (data) => {
+    this.core.notify("media:seeked", data);
+    this.props.onSeeked?.(data);
+  }
+
+  handleMediaTimeUpdate = (data) => {
+    this.core.notify("media:timeupdate", data);
+    this.props.onTimeUpdate?.(data);
+  }
+
+  handleMediaDurationChange = (data) => {
+    this.core.notify("media:durationchange", data);
+    this.props.onDurationChange?.(data);
+  }
+
+  handleMediaLoadStart = (data) => {
+    this.core.notify("media:loadstart", data);
+    this.props.onLoadStart?.(data);
+  }
+
+  handleMediaLoadedData = (data) => {
+    this.core.notify("media:loadeddata", data);
+    this.props.onLoadedData?.(data);
+  }
+
+  handleMediaLoadedMetadata = (data) => {
+    this.core.notify("media:loadedmetadata", data);
+    this.props.onLoadedMetadata?.(data);
+  }
+
+  handleMediaCanPlay = (data) => {
+    this.core.notify("media:canplay", data);
+    this.props.onCanPlay?.(data);
+  }
+
+  handleMediaCanPlayThrough = (data) => {
+    this.core.notify("media:canplaythrough", data);
+    this.props.onCanPlayThrough?.(data);
+  }
+
+  handleMediaWaiting = (data) => {
+    this.core.notify("media:waiting", data);
+    this.props.onWaiting?.(data);
+  }
+
+  handleMediaStalled = (data) => {
+    this.core.notify("media:stalled", data);
+    this.props.onStalled?.(data);
+  }
+
+  handleMediaSuspend = (data) => {
+    this.core.notify("media:suspend", data);
+    this.props.onSuspend?.(data);
+  }
+
+  handleMediaVolumeChange = (data) => {
+    this.core.notify("media:volumechange", data);
+    this.props.onVolumeChange?.(data);
+  }
+
+  handleMediaError = (data) => {
+    this.core.notify("media:error", data);
+    this.props.onError?.(data);
+  }
+
+  handleMediaPlaylistItemChange = (data) => {
+    this.core.notify("media:playlistitemchange", data);
+    this.props.onPlaylistItemChange?.(data);
+  }
+
+  handleMediaResize = (data) => {
+    this.core.notify("media:resize", data);
+  }
+
+  // ============================================================================
+  // MEDIA PLAYER EVENT HANDLERS
+  // ============================================================================
+
+  handleMediaPlayEvent = ({ currentTime }) => {
     // Timing technique haptique
     this.hapticTime = currentTime || 0;
     this.lastMediaTime = this.hapticTime;
@@ -195,84 +483,75 @@ class FunPlayer extends Component {
     
     const duration = this.mediaPlayerRef.current?.getDuration() || 0;
     
-    core.playlist.updatePlaybackState(true, currentTime, duration);
+    this.core.playlist.updatePlaybackState(true, currentTime, duration);
     
     // Démarrage boucle haptique
-    if (core.funscript.hasFunscript()) {
+    if (this.core.funscript.hasFunscript()) {
       this.startHapticLoop();
-      core.notify?.('status:funplayer', { message: `Haptic playback started at ${currentTime.toFixed(1)}s`, type: 'log' });
+      this.core.notify?.('status:funplayer', { message: `Haptic playback started at ${currentTime.toFixed(1)}s`, type: 'log' });
     }
   }
 
-  handleMediaPause = async ({ currentTime }) => {
+  handleMediaPauseEvent = async ({ currentTime }) => {
     // Arrêt boucle haptique
-    if (core.funscript.hasFunscript()) {
+    if (this.core.funscript.hasFunscript()) {
       this.stopHapticLoop();
       try {
-        await core.buttplug.stopAll();
-        core.notify?.('status:funplayer', { message: 'Haptic devices stopped', type: 'log' });
+        await this.core.buttplug.stopAll();
+        this.core.notify?.('status:funplayer', { message: 'Haptic devices stopped', type: 'log' });
       } catch (error) {
-        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
+        this.core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
       }
     }
     
     const duration = this.mediaPlayerRef.current?.getDuration() || 0;
-    core.playlist.updatePlaybackState(false, currentTime, duration);
+    this.core.playlist.updatePlaybackState(false, currentTime, duration);
     
     this.setState({ currentActuatorData: new Map() });
   }
 
-  handleMediaEnd = async ({ currentTime }) => {
+  handleMediaEndedEvent = async ({ currentTime }) => {
     // Arrêt boucle haptique
-    if (core.funscript.hasFunscript()) {
+    if (this.core.funscript.hasFunscript()) {
       this.stopHapticLoop();
       try {
-        await core.buttplug.stopAll();
-        core.notify?.('status:funplayer', { message: 'Haptic playback ended', type: 'log' });
+        await this.core.buttplug.stopAll();
+        this.core.notify?.('status:funplayer', { message: 'Haptic playback ended', type: 'log' });
       } catch (error) {
-        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices on end', type: 'log', error: error.message });
+        this.core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices on end', type: 'log', error: error.message });
       }
     }
     
-    core.playlist.updatePlaybackState(false, 0, 0);
+    this.core.playlist.updatePlaybackState(false, 0, 0);
     
     this.hapticTime = 0;
     this.lastMediaTime = 0;
     this.setState({ currentActuatorData: new Map() });
   }
 
-  // ✅ MODIFIÉ: Buffering officiel = patience infinie
-  handleMediaWaiting = ({ currentTime }) => {
-    if (this.isBuffering && this.bufferingSource === 'waiting') {
-      // Déjà en buffering officiel
-      return;
-    }
-    
-    // Arrêter tout timeout de stall en cours (priorité au buffering officiel)
-    if (this.stallTimeoutId) {
-      clearTimeout(this.stallTimeoutId);
-      this.stallTimeoutId = null;
-    }
-    
-    this._startBuffering('waiting', currentTime);
+  handleMediaSeekingEvent = ({ currentTime }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: `Seeking to ${currentTime.toFixed(1)}s`, type: 'log' });
   }
 
-  // ✅ MODIFIÉ: Sortie de buffering = reset état d'abandon
-  handleMediaCanPlay = ({ currentTime }) => {
-    if (this.isBuffering) {
-      this._endBuffering('canplay', currentTime);
+  handleMediaSeekedEvent = ({ currentTime }) => {
+    // Sync haptique après seek
+    if (this.core.funscript.hasFunscript() && this.hapticIntervalId) {
+      this.hapticTime = currentTime;
+      this.lastMediaTime = currentTime;
+      this.lastSyncTime = performance.now();
+      this.core.notify?.('status:funplayer', { message: `Seeked to ${currentTime.toFixed(1)}s`, type: 'log' });
     }
   }
 
-  // ✅ MODIFIÉ: Détection stall conservatrice avec timeout d'abandon
-  handleMediaTimeUpdate = ({ currentTime }) => {
+  handleMediaTimeUpdateEvent = ({ currentTime }) => {
     // Si haptique déjà abandonné, ne plus rien faire
     if (this.isHapticAborted) {
       return;
     }
     
     // Synchronisation timing haptique (technique pur)
-    if (!core.funscript.hasFunscript() || !this.hapticIntervalId) {
+    if (!this.core.funscript.hasFunscript() || !this.hapticIntervalId) {
       return;
     }
     
@@ -282,7 +561,7 @@ class FunPlayer extends Component {
     
     // ✅ Détection stall : 1s+ sans progression ET pas de buffering officiel
     if (timeSinceLastSync > 1.0 && Math.abs(mediaTimeDelta) < 0.01 && !this.isBuffering) {
-      core.notify?.('status:funplayer', { message: 'Player stall detected (1s+ frozen), starting timeout', type: 'error' });
+      this.core.notify?.('status:funplayer', { message: 'Player stall detected (1s+ frozen), starting timeout', type: 'error' });
       this._startBuffering('stall_detection', currentTime);
       return;
     }
@@ -297,51 +576,108 @@ class FunPlayer extends Component {
       this.lastSyncTime = now;
       
       if (drift > 0.1) {
-        core.notify?.('status:funplayer', { message: `Haptic drift detected: ${(drift * 1000).toFixed(1)}ms, resyncing`, type: 'log' });
+        this.core.notify?.('status:funplayer', { message: `Haptic drift detected: ${(drift * 1000).toFixed(1)}ms, resyncing`, type: 'log' });
       }
     }
   }
 
-  handleMediaSeek = ({ currentTime }) => {
-    // Sync haptique après seek
-    if (core.funscript.hasFunscript() && this.hapticIntervalId) {
-      this.hapticTime = currentTime;
-      this.lastMediaTime = currentTime;
-      this.lastSyncTime = performance.now();
-      core.notify?.('status:funplayer', { message: `Haptic synced to ${currentTime.toFixed(1)}s after seek`, type: 'log' });
-    }
+  handleMediaDurationChangeEvent = ({ duration }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: `Duration changed: ${duration.toFixed(1)}s`, type: 'log' });
   }
 
-  // Groupe 2: Callbacks métier
-  handleMediaLoadEnd = (data) => {
-    core.notify?.('status:funplayer', { message: `Media loaded: ${data.duration.toFixed(1)}s`, type: 'log' });
+  handleMediaLoadStartEvent = (data) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: 'Media loading started', type: 'log' });
+  }
+
+  handleMediaLoadedDataEvent = ({ duration }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: `Media data loaded: ${duration.toFixed(1)}s`, type: 'log' });
+  }
+
+  handleMediaLoadedMetadataEvent = (data) => {
+    this.core.notify?.('status:funplayer', { message: `Media loaded: ${data.duration.toFixed(1)}s`, type: 'log' });
     
-    const currentItem = core.playlist.getCurrentItem();
+    const currentItem = this.core.playlist.getCurrentItem();
     if (currentItem && Math.abs((currentItem.duration || 0) - data.duration) > 1) {
-      core.notify?.('status:funplayer', { message: `Duration corrected: ${currentItem.duration?.toFixed(1) || 'unknown'}s → ${data.duration.toFixed(1)}s`, type: 'log' });
-      core.playlist.updateCurrentItemDuration(data.duration);
+      this.core.notify?.('status:funplayer', { message: `Duration corrected: ${currentItem.duration?.toFixed(1) || 'unknown'}s → ${data.duration.toFixed(1)}s`, type: 'log' });
+      this.core.playlist.updateCurrentItemDuration(data.duration);
     }
     
-    this.triggerResize();
+    this.handleResize();
   }
 
-  handleMediaError = (error) => {
-    core.notify?.('status:funplayer', { message: 'Media loading failed', type: 'error', error: error.message });
-    core.setError('Media loading failed', error);
+  handleMediaCanPlayEvent = ({ currentTime }) => {
+    this.core.notify?.('status:funplayer', { message: 'Media can play', type: 'log' });
+    if (this.isBuffering) {
+      this._endBuffering('canplay', currentTime);
+    }
   }
 
-  // Groupe 3: Navigation playlist
-  handlePlaylistItemChange = (newVideoJsIndex) => {
-    core.notify?.('status:funplayer', { message: `MediaPlayer switched to item ${newVideoJsIndex}`, type: 'log' });
+  handleMediaCanPlayThroughEvent = ({ currentTime }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: 'Media can play through', type: 'log' });
+  }
+
+  handleMediaWaitingEvent = ({ currentTime }) => {
+    if (this.isBuffering && this.bufferingSource === 'waiting') {
+      // Déjà en buffering officiel
+      return;
+    }
+    
+    // Arrêter tout timeout de stall en cours (priorité au buffering officiel)
+    if (this.stallTimeoutId) {
+      clearTimeout(this.stallTimeoutId);
+      this.stallTimeoutId = null;
+    }
+    
+    this._startBuffering('waiting', currentTime);
+  }
+
+  handleMediaStalledEvent = ({ currentTime }) => {
+    // Similaire à waiting
+    this.handleMediaWaitingEvent({ currentTime });
+  }
+
+  handleMediaSuspendEvent = ({ currentTime }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { message: 'Media loading suspended', type: 'log' });
+  }
+
+  handleMediaVolumeChangeEvent = ({ volume, muted }) => {
+    // Pas de logique spéciale pour l'instant
+    this.core.notify?.('status:funplayer', { 
+      message: `Volume: ${muted ? 'muted' : Math.round(volume * 100) + '%'}`, 
+      type: 'log' 
+    });
+  }
+
+  handleMediaErrorEvent = (error) => {
+    this.core.notify?.('status:funplayer', { message: 'Media loading failed', type: 'error', error: error.message });
+    this.core.setError('Media loading failed', error);
+  }
+
+  handleMediaPlaylistItemChangeEvent = (newVideoJsIndex) => {
+    this.core.notify?.('status:funplayer', { message: `MediaPlayer switched to item ${newVideoJsIndex}`, type: 'log' });
     
     if (newVideoJsIndex >= 0) {
-      const currentPlaylistIndex = core.playlist.getCurrentIndex();
+      const currentPlaylistIndex = this.core.playlist.getCurrentIndex();
       
       if (newVideoJsIndex !== currentPlaylistIndex) {
-        core.notify?.('status:funplayer', { message: `Syncing core playlist to Video.js index ${newVideoJsIndex}`, type: 'log' });
-        core.playlist.goTo(newVideoJsIndex);
+        this.core.notify?.('status:funplayer', { message: `Syncing core playlist to Video.js index ${newVideoJsIndex}`, type: 'log' });
+        this.core.playlist.goTo(newVideoJsIndex);
       }
     }
+  }
+
+  handleMediaResizeEvent = (data) => {
+    // ✅ NOUVEAU: Via bus d'événements avec contexte Video.js
+    this.core.notify('component:resize', {
+      source: 'MediaPlayer',
+      reason: 'video-js-resize',
+      dimensions: data  // Video.js fournit { width, height } pour information
+    });
   }
 
   // ============================================================================
@@ -362,10 +698,10 @@ class FunPlayer extends Component {
     if (this.hapticIntervalId) {
       this.stopHapticLoop();
       try {
-        core.buttplug.stopAll();
-        core.notify?.('status:funplayer', { message: `Buffering suspended (${source})`, type: 'log' });
+        this.core.buttplug.stopAll();
+        this.core.notify?.('status:funplayer', { message: `Buffering suspended (${source})`, type: 'log' });
       } catch (error) {
-        core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
+        this.core.notify?.('status:funplayer', { message: 'Failed to stop haptic devices', type: 'log', error: error.message });
       }
     }
     
@@ -377,7 +713,7 @@ class FunPlayer extends Component {
         this._abortHapticPlayback();
       }, this.stallTimeout);
       
-      core.notify?.('status:funplayer', { message: `Player stall timeout started (${this.stallTimeout}ms)`, type: 'error' });
+      this.core.notify?.('status:funplayer', { message: `Player stall timeout started (${this.stallTimeout}ms)`, type: 'error' });
     }
     // Pour 'waiting' : pas de timeout, patience infinie
   }
@@ -401,12 +737,12 @@ class FunPlayer extends Component {
     // ✅ NOUVEAU: Reset abandon si le player s'est remis
     if (this.isHapticAborted && trigger === 'canplay') {
       this.isHapticAborted = false;
-      core.notify?.('status:funplayer', { message: 'Player recovered, haptic playback re-enabled', type: 'success' });
+      this.core.notify?.('status:funplayer', { message: 'Player recovered, haptic playback re-enabled', type: 'success' });
     }
     
     // Reprendre si conditions OK
     const mediaPlayer = this.mediaPlayerRef.current;
-    if (mediaPlayer && mediaPlayer.isPlaying() && core.funscript.hasFunscript() && !this.isHapticAborted) {
+    if (mediaPlayer && mediaPlayer.isPlaying() && this.core.funscript.hasFunscript() && !this.isHapticAborted) {
       // Re-synchroniser proprement
       this.hapticTime = currentTime || mediaPlayer.getTime();
       this.lastMediaTime = this.hapticTime;
@@ -415,7 +751,7 @@ class FunPlayer extends Component {
       this.startHapticLoop();
       
       const sourceInfo = wasStallDetection ? ' (stall recovered)' : '';
-      core.notify?.('status:funplayer', { message: `Buffering ended via ${trigger} (${bufferingDuration.toFixed(0)}ms)${sourceInfo}, haptic resumed`, type: 'success' });
+      this.core.notify?.('status:funplayer', { message: `Buffering ended via ${trigger} (${bufferingDuration.toFixed(0)}ms)${sourceInfo}, haptic resumed`, type: 'success' });
     }
   }
 
@@ -437,7 +773,7 @@ class FunPlayer extends Component {
     // Arrêt définitif de la boucle haptique
     this.stopHapticLoop();
     try {
-      core.buttplug.stopAll();
+      this.core.buttplug.stopAll();
     } catch (error) {
       // Silent fail
     }
@@ -447,16 +783,16 @@ class FunPlayer extends Component {
     if (mediaPlayer) {
       try {
         mediaPlayer.pause();
-        core.notify?.('status:funplayer', { message: 'Sent pause command to unresponsive player', type: 'log' });
+        this.core.notify?.('status:funplayer', { message: 'Sent pause command to unresponsive player', type: 'log' });
       } catch (error) {
-        core.notify?.('status:funplayer', { message: 'Failed to send pause to player', type: 'log', error: error.message });
+        this.core.notify?.('status:funplayer', { message: 'Failed to send pause to player', type: 'log', error: error.message });
       }
     }
     
     this.setState({ currentActuatorData: new Map() });
     
     // Status d'erreur final
-    core.notify?.('status:funplayer', { 
+    this.core.notify?.('status:funplayer', { 
       message: `Media playing aborted due to unresponsive player (${bufferingDuration.toFixed(0)}ms stall)`, 
       type: 'error' 
     });
@@ -484,7 +820,7 @@ class FunPlayer extends Component {
     const adjustedDuration = this.calculateLinearDuration(timeDelta, mediaRefreshRate);
     
     // Orchestration haptique via core
-    const visualizerData = await core.processHapticFrame(currentTime, { 
+    const visualizerData = await this.core.processHapticFrame(currentTime, { 
       duration: adjustedDuration * 1000 
     });
     
@@ -497,8 +833,16 @@ class FunPlayer extends Component {
     this.expectedHapticTime = performance.now();
     const targetInterval = 1000 / this.state.updateRate;
     
-    core.notify?.('status:funplayer', { message: `Starting haptic loop at ${this.state.updateRate}Hz`, type: 'log' });
-    
+    this.core.notify?.('status:funplayer', { message: `Starting haptic loop at ${this.state.updateRate}Hz`, type: 'log' });
+
+    // ✅ NOUVEAU: Émettre événement haptic started sur le bus
+    const hapticData = {
+      channels: this.core.funscript.getChannels().length,
+      updateRate: this.state.updateRate,
+      reason: 'media_play'
+    };
+    this.core.notify('haptic:started', hapticData);
+
     const optimizedLoop = () => {
       try {
         const currentTime = performance.now();
@@ -519,7 +863,7 @@ class FunPlayer extends Component {
         }
         
       } catch (error) {
-        core.notify?.('status:funplayer', { message: 'Haptic loop error', type: 'error', error: error.message });
+        this.core.notify?.('status:funplayer', { message: 'Haptic loop error', type: 'error', error: error.message });
         this.hapticIntervalId = setTimeout(optimizedLoop, targetInterval);
       }
     };
@@ -531,7 +875,12 @@ class FunPlayer extends Component {
     if (this.hapticIntervalId) {
       clearTimeout(this.hapticIntervalId);
       this.hapticIntervalId = null;
-      core.notify?.('status:funplayer', { message: 'Haptic loop stopped', type: 'log' });
+      this.core.notify?.('status:funplayer', { message: 'Haptic loop stopped', type: 'log' });
+            // ✅ NOUVEAU: Émettre événement haptic stopped sur le bus
+      const hapticData = {
+        reason: 'media_pause'
+      };
+      this.core.notify('haptic:stopped', hapticData);
     }
     this.expectedHapticTime = 0;
     this.lastSyncTime = 0;
@@ -540,10 +889,14 @@ class FunPlayer extends Component {
   restartWithNewRate = () => {
     const wasPlaying = this.hapticIntervalId !== null;
     if (wasPlaying) {
-      core.notify?.('status:funplayer', { message: `Restarting haptic loop with new rate: ${this.state.updateRate}Hz`, type: 'log' });
+      this.core.notify?.('status:funplayer', { message: `Restarting haptic loop with new rate: ${this.state.updateRate}Hz`, type: 'log' });
       this.stopHapticLoop();
       this.startHapticLoop();
     }
+  }
+
+  getCurrentActuatorData = () => {
+    return this.state.currentActuatorData;
   }
 
   // ============================================================================
@@ -578,7 +931,7 @@ class FunPlayer extends Component {
   getUpdateRate = () => this.state.updateRate
 
   handleUpdateRateChange = (newRate) => {
-    core.notify?.('status:funplayer', { message: `Update rate changed: ${this.state.updateRate}Hz → ${newRate}Hz`, type: 'log' });
+    this.core.notify?.('status:funplayer', { message: `Update rate changed: ${this.state.updateRate}Hz → ${newRate}Hz`, type: 'log' });
     this.setState({ updateRate: newRate });
   }
 
@@ -586,177 +939,93 @@ class FunPlayer extends Component {
   // UI CALLBACKS
   // ============================================================================
 
-  triggerResize = () => this.props.onResize?.()
 
   handleToggleVisualizer = () => {
     const newState = !this.state.showVisualizer;
-    core.notify?.('status:funplayer', { message: `Visualizer ${newState ? 'shown' : 'hidden'}`, type: 'log' });
+    this.core.notify?.('status:funplayer', { message: `Visualizer ${newState ? 'shown' : 'hidden'}`, type: 'log' });
     this.setState({ showVisualizer: newState }, () => {
-      this.triggerResize();
+      this.handleResize();
     });
   }
 
   handleToggleDebug = () => {
     const newState = !this.state.showDebug;
-    core.notify?.('status:funplayer', { message: `Debug panel ${newState ? 'shown' : 'hidden'}`, type: 'log' });
+    this.core.notify?.('status:funplayer', { message: `Debug panel ${newState ? 'shown' : 'hidden'}`, type: 'log' });
     this.setState({ showDebug: newState }, () => {
-      this.triggerResize();
+      this.handleResize();
     });
   }
 
   // ============================================================================
-  // RENDER METHODS
+  // RENDER
   // ============================================================================
 
-  renderDebugInfo = () => {
-    // Afficher seulement si showDebug est activé ET enableConsoleLogging
-    if (!this.state.showDebug) {
-      return null;
-    }
-
+  render() {
+    const { showVisualizer, showDebug } = this.state;
+    const playlistItems = this.core.playlist.items;
+    
     return (
-      <LoggingComponent 
-        onResize={this.triggerResize}
-      />
-    );
-  }
-
-  renderHapticSettings() {
-    return (
-      <div className="fp-block fp-block-first haptic-settings-section">
-        <HapticSettingsComponent 
+      <div className="fp-funplayer" ref={this.containerRef} >
+        
+        {/* Settings haptiques */}
+        <HapticSettingsComponent
+          core={this.core} 
           onUpdateRateChange={this.handleUpdateRateChange}
           onGetUpdateRate={this.getUpdateRate}
-          onResize={this.triggerResize}
         />
-      </div>
-    );
-  }
-
-  renderMediaPlayer() {
-    const playlistItems = core.playlist.items;
-    
-    return (
-      <div className="fp-block fp-block-middle media-section">
+        
+        {/* Lecteur vidéo */}
         <MediaPlayer
           ref={this.mediaPlayerRef}
-          
-          /* Props pour MediaPlayer autonome */
           playlist={playlistItems}
-          notify={core.notify}
-          
-          /* Callbacks haptiques (timing critique) */
+          notify={this.core.notify}
           onPlay={this.handleMediaPlay}
           onPause={this.handleMediaPause}
-          onEnd={this.handleMediaEnd}
+          onEnded={this.handleMediaEnded}
+          onSeeking={this.handleMediaSeeking}
+          onSeeked={this.handleMediaSeeked}
           onTimeUpdate={this.handleMediaTimeUpdate}
-          onSeek={this.handleMediaSeek}
-          
-          /* ✅ NOUVEAU: Callbacks buffering */
-          onWaiting={this.handleMediaWaiting}
+          onDurationChange={this.handleMediaDurationChange}
+          onLoadStart={this.handleMediaLoadStart}
+          onLoadedData={this.handleMediaLoadedData}
+          onLoadedMetadata={this.handleMediaLoadedMetadata}
           onCanPlay={this.handleMediaCanPlay}
-          
-          /* Callbacks métier */
-          onLoadEnd={this.handleMediaLoadEnd}
+          onCanPlayThrough={this.handleMediaCanPlayThrough}
+          onWaiting={this.handleMediaWaiting}
+          onStalled={this.handleMediaStalled}
+          onSuspend={this.handleMediaSuspend}
+          onVolumeChange={this.handleMediaVolumeChange}
           onError={this.handleMediaError}
-          
-          /* Navigation playlist */
-          onPlaylistItemChange={this.handlePlaylistItemChange}
+          onResize={this.handleResize}
         />
-      </div>
-    );
-  }
-
-  renderHapticVisualizer() {
-    if (!this.state.showVisualizer) return null;
-    
-    const { isPlaying } = this.state;
-    
-    return (
-      <div className="fp-block fp-block-middle haptic-visualizer-section">
+        
         <HapticVisualizerComponent
-          getCurrentActuatorData={() => this.state.currentActuatorData}
-          isPlaying={isPlaying}
-          onResize={this.triggerResize}
+          core={this.core}
+          visible={showVisualizer}
+          isPlaying={this.state.isPlaying}
+          getCurrentActuatorData={this.getCurrentActuatorData}
         />
-      </div>
-    );
-  }
-
-  renderStatusBar() {
-    const { showVisualizer, showDebug } = this.state;
-    
-    const coreStatus = core.getStatus();
-    const playlistInfo = core.playlist.getPlaylistInfo();
-    
-    return (
-      <div className="fp-block fp-block-last status-bar-section">
-        <div className="fp-section-compact fp-layout-horizontal">
-          <div className="fp-layout-row">
-            <span className={`fp-status-dot ${coreStatus.isReady ? 'ready' : 'loading'}`}>
-              {coreStatus.isReady ? '✅' : '⏳'}
-            </span>
-            <span className="fp-label">
-              {coreStatus.error ? `❌ ${coreStatus.error}` : coreStatus.status}
-            </span>
-          </div>
-          
-          <div className="fp-layout-row fp-layout-compact">
-            <span className="fp-badge">
-              {this.state.updateRate}Hz
-            </span>
-            
-            {playlistInfo.totalItems > 1 && (
-              <span className="fp-unit">
-                {playlistInfo.currentIndex + 1}/{playlistInfo.totalItems}
-              </span>
-            )}
-            
-            {core.funscript.hasFunscript() && (
-              <span className="fp-unit">
-                {core.funscript.getChannels().length} channels
-              </span>
-            )}
-            
-            <button 
-              className="fp-btn fp-btn-ghost fp-chevron"
-              onClick={this.handleToggleVisualizer}
-              title={showVisualizer ? "Hide Visualizer" : "Show Visualizer"}
-            >
-              {showVisualizer ? '📊' : '📈'}
-            </button>
-            
-            <button 
-              className="fp-btn fp-btn-ghost fp-chevron"
-              onClick={this.handleToggleDebug}
-              title={showDebug ? "Hide Debug" : "Show Debug"}
-            >
-              {showDebug ? '🐛' : '🔍'}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  render() {
-    const playlistInfo = core.playlist.getPlaylistInfo();
-    const playlistItems = core.playlist.items;
-    
-    return (
-      <div className="fun-player">
         
-        <div className="fp-main-column">
-          {this.renderHapticSettings()}
-          {this.renderMediaPlayer()}
-          {this.renderHapticVisualizer()}
-          {this.renderDebugInfo()}
-          {this.renderStatusBar()}
-        </div>
+        <LoggingComponent
+          core={this.core}
+          visible={showDebug}
+        />
         
-        {playlistItems.length > 1 && (
-          <PlaylistComponent/>
-        )}
+        {/* Barre de status */}
+        <StatusBarComponent
+          core={this.core}
+          isPlaying={this.state.isPlaying}
+          updateRate={this.state.updateRate}
+          showVisualizer={showVisualizer}
+          showDebug={showDebug}
+          onToggleVisualizer={this.handleToggleVisualizer}
+          onToggleDebug={this.handleToggleDebug}
+        />
+        
+        <PlaylistComponent
+          core={this.core} 
+          visible={playlistItems.length > 1}
+        />
         
       </div>
     );

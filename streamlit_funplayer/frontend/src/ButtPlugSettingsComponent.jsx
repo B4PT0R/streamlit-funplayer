@@ -1,21 +1,23 @@
 import React, { Component } from 'react';
-import core from './FunPlayerCore';
 
 /**
  * ButtPlugSettingsComponent - ✅ NETTOYÉ: UI pure sans notifications
  * 
  * RESPONSABILITÉS SIMPLIFIÉES:
  * - Barre horizontale compacte (status + actions)
- * - Appels directs core.xxx (pas d'indirections)
+ * - Appels directs this.core.xxx (pas d'indirections)
  * - Re-render sur événements choisis uniquement
  * - ✅ CLEAN: Pas de notifications status (c'est aux managers de le faire)
  */
 class ButtPlugSettingsComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       isAutoConnecting: false,
+      isRescanActive: false,  // ✅ NOUVEAU: État pour le bouton rescan
       renderTrigger: 0
     };
     
@@ -23,7 +25,7 @@ class ButtPlugSettingsComponent extends Component {
   }
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
@@ -66,7 +68,7 @@ class ButtPlugSettingsComponent extends Component {
     
     try {
       // Appel direct core - les notifications seront faites par les managers
-      const result = await core.autoConnect();
+      const result = await this.core.autoConnect();
       console.log('Auto-connect result:', result);
     } catch (error) {
       console.error('Auto-connect failed:', error);
@@ -78,9 +80,24 @@ class ButtPlugSettingsComponent extends Component {
   handleDisconnect = async () => {
     try {
       // Appel direct core - les notifications seront faites par ButtPlugManager
-      await core.buttplug.disconnect();
+      await this.core.buttplug.disconnect();
     } catch (error) {
       console.error('Disconnection failed:', error);
+    }
+  }
+
+  // ✅ NOUVEAU: Bouton rescan pour chercher de nouveaux devices
+  handleRescan = async () => {
+    this.setState({ isRescanActive: true });
+    
+    try {
+      // Appel direct this.core.buttplug.scan()
+      const newDevices = await this.core.buttplug.scan();
+      console.log('Rescan result:', newDevices);
+    } catch (error) {
+      console.error('Rescan failed:', error);
+    } finally {
+      this.setState({ isRescanActive: false });
     }
   }
 
@@ -88,7 +105,7 @@ class ButtPlugSettingsComponent extends Component {
     try {
       const numericIndex = deviceIndex === '-1' ? -1 : parseInt(deviceIndex);
       // Appel direct core - les notifications seront faites par ButtPlugManager
-      core.buttplug.selectDevice(numericIndex);
+      this.core.buttplug.selectDevice(numericIndex);
     } catch (error) {
       console.error('Device selection failed:', error);
     }
@@ -104,41 +121,41 @@ class ButtPlugSettingsComponent extends Component {
       isSettingsExpanded 
     } = this.props;
     
-    const { isAutoConnecting } = this.state;
+    const { isAutoConnecting, isRescanActive } = this.state;
     
     // Accès direct core pour toutes les données
-    const buttplugStatus = core.buttplug.getStatus();
-    const funscriptChannels = core.funscript.getChannelNames();
-    const devices = core.buttplug.getDevices();
-    const selectedDevice = core.buttplug.getSelected();
+    const buttplugStatus = this.core.buttplug.getStatus();
+    const funscriptChannels = this.core.funscript.getChannelNames();
+    const devices = this.core.buttplug.getDevices();
+    const selectedDevice = this.core.buttplug.getSelected();
     
     const isConnected = buttplugStatus?.isConnected || false;
     
     return (
-      <div className="fp-section-compact fp-layout-horizontal">
+      <div className="fp-buttplug-settings">
         
-        {/* Status + Device info */}
-        <div className="fp-layout-row fp-flex">
-          <span className="fp-status-dot">
+        {/* Zone status à gauche */}
+        <div className="fp-buttplug-settings-status">
+          <span className="fp-buttplug-settings-connection-dot">
             {isConnected ? '🟢' : '🔴'}
           </span>
-          <span className="fp-label fp-device-name">
+          <span className="fp-buttplug-settings-device-name">
             {selectedDevice?.name || 'Unknown device'}
           </span>
           {funscriptChannels.length === 0 && (
-            <span className="fp-unit" style={{ opacity: 0.5 }}>
+            <span className="fp-buttplug-settings-no-haptic-hint">
               No haptic
             </span>
           )}
         </div>
         
-        {/* Actions */}
-        <div className="fp-layout-row fp-no-shrink">
+        {/* Zone actions à droite */}
+        <div className="fp-buttplug-settings-actions">
           
           {/* Connect/Disconnect */}
           {!isConnected ? (
             <button 
-              className="fp-btn fp-btn-primary"
+              className="fp-buttplug-settings-connect-btn"
               onClick={this.handleAutoConnect}
               disabled={isAutoConnecting || funscriptChannels.length === 0}
               title={funscriptChannels.length === 0 ? "Load funscript first" : "Connect to Intiface Central"}
@@ -150,17 +167,29 @@ class ButtPlugSettingsComponent extends Component {
               )}
             </button>
           ) : (
-            <button 
-              className="fp-btn fp-btn-primary"
-              onClick={this.handleDisconnect}
-            >
-              🔌 Disconnect
-            </button>
+            <>
+              <button 
+                className="fp-buttplug-settings-disconnect-btn"
+                onClick={this.handleDisconnect}
+              >
+                🔌 Disconnect
+              </button>
+              
+              {/* Bouton rescan */}
+              <button
+                className="fp-buttplug-settings-rescan-btn"
+                onClick={this.handleRescan}
+                disabled={isRescanActive}
+                title="Scan for new devices"
+              >
+                {isRescanActive ? '🔄' : '🔍'}
+              </button>
+            </>
           )}
           
           {/* Device selector */}
           <select
-            className="fp-input fp-select fp-min-width"
+            className="fp-buttplug-settings-device-select"
             value={selectedDevice?.index ?? -1}
             onChange={(e) => this.handleDeviceChange(e.target.value)}
             disabled={funscriptChannels.length === 0}
@@ -177,13 +206,14 @@ class ButtPlugSettingsComponent extends Component {
           
           {/* Settings toggle */}
           <button
-            className="fp-btn fp-btn-ghost fp-chevron"
+            className="fp-buttplug-settings-toggle"
             onClick={onToggleSettings}
             title={isSettingsExpanded ? "Hide haptic settings" : "Show haptic settings"}
           >
             {isSettingsExpanded ? '▲' : '▼'}
           </button>
         </div>
+        
       </div>
     );
   }

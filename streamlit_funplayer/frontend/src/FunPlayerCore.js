@@ -19,9 +19,6 @@ class FunPlayerCore {
   static instance = null;
   
   constructor() {
-    if (FunPlayerCore.instance) {
-      return FunPlayerCore.instance;
-    }
     
       // ✅ NOUVEAU: Configuration logging
     this.enableConsoleLogging = process.env.NODE_ENV !== 'production';
@@ -49,18 +46,9 @@ class FunPlayerCore {
     // ============================================================================
     this.listeners = new Set();
     this.addListener(this.handleEvent)
-    
-    FunPlayerCore.instance = this;
 
     // ✅ MODIFIÉ: Log de session via LoggingManager
     this.logging.addInitialSessionMessage();
-  }
-  
-  static getInstance() {
-    if (!FunPlayerCore.instance) {
-      new FunPlayerCore();
-    }
-    return FunPlayerCore.instance;
   }
 
   // ============================================================================
@@ -99,6 +87,8 @@ class FunPlayerCore {
       this._handleFunscriptEvent(event, data);
     } else if (event.startsWith('playlist:')) {
       this._handlePlaylistEvent(event, data);
+    } else if (event.startsWith('media:')) {
+      this._handleMediaEvent(event, data);
     } else if (event.startsWith('core:')) {
       this._handleCoreEvent(event, data);
     } else if (event.startsWith('logging:')) {
@@ -221,11 +211,9 @@ class FunPlayerCore {
           type: data.device ? 'success' : 'info'
         });
         
-        console.log('🎯 TRIGGER Intelligent AutoMap from buttplug:device event');
         if (data.device) {
           setTimeout(() => {
             const mapResult = this.autoMapChannels(); // ✅ Utilise le nouvel autoMap intelligent
-            console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels after device selection`);
           }, 100);
         }
         break;
@@ -249,7 +237,6 @@ class FunPlayerCore {
       case 'funscript:load':
         setTimeout(() => {
           const mapResult = this.autoMapChannels(); // ✅ Utilise le nouvel autoMap intelligent
-          console.log(`Auto-mapped ${mapResult.mapped}/${mapResult.total} channels after funscript load`);
         }, 100);
         break;
         
@@ -353,6 +340,13 @@ class FunPlayerCore {
     }
   }
 
+  _handleMediaEvent = (event, data) => {
+    switch (event) {
+      default:
+        break
+    }
+  }
+
   // ============================================================================
   // GLOBAL STATE HELPERS (INCHANGÉ)
   // ============================================================================
@@ -433,13 +427,15 @@ class FunPlayerCore {
   async autoConnect(scanTimeout = 3000) {
     try {
       const connected = await this.buttplug.connect();
+      
       if (!connected) {
         throw new Error('Failed to connect to Intiface Central');
       }
       
-      const devices = await this.buttplug.scan(scanTimeout);
+      const devices = this.buttplug.getDevices().filter(device => device.index>=0)
+
       if (devices.length === 0) {
-        throw new Error('No devices found');
+        throw new Error('No physical device found');
       }
       
       const selectSuccess = this.buttplug.selectDevice(devices[0].index);
@@ -966,14 +962,6 @@ class FunPlayerCore {
       this._logging = null;
     }
   }
-  
-  static async reset() {
-    if (FunPlayerCore.instance) {
-      await FunPlayerCore.instance.cleanup();
-      FunPlayerCore.instance = null;
-    }
-  }
 }
 
-// Export de l'instance singleton
-export default FunPlayerCore.getInstance();
+export default FunPlayerCore;

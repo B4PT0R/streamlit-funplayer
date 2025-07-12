@@ -56,6 +56,7 @@ Thumbs.db
 /dist/
 /build/
 
+
 # Version control
 .git/
 .hg/
@@ -67,7 +68,9 @@ node_modules/
 bower_components/
 #spkg package-lock.json
 #spkg bootstrap.min.css
+#spkg 
 #spkg streamlit_funplayer/frontend/build
+#spkg streamlit_funplayer/frontend/build-embed
 yarn.lock
 npm-debug.log
 yarn-error.log

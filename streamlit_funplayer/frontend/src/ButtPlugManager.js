@@ -154,9 +154,10 @@ class ButtPlugManager {
 
     try {
       this.isScanning = true;
-      const initialCount = this.devices.size;
       
-      // ✅ NOUVEAU: Status scanning
+      // ✅ CAPTURE des indices existants AVANT le scan
+      const existingIndices = new Set(this.devices.keys());
+      
       this.notify?.('status:buttplug', { 
         message: 'Scanning for devices...', 
         type: 'processing' 
@@ -166,12 +167,19 @@ class ButtPlugManager {
       await new Promise(resolve => setTimeout(resolve, timeout));
       await this.client.stopScanning();
       
-      const newCount = this.devices.size - initialCount;
+      // ✅ SYNCHRONISATION: Mettre à jour notre Map avec ce que buttplug a trouvé
+      const foundDevices = this.client.devices;
+      foundDevices.forEach(device => {
+        this.devices.set(device.index, device);
+      });
       
-      // ✅ NOUVEAU: Résultat scan
-      if (newCount > 0) {
+      // ✅ FILTRAGE basé sur les indices qu'on avait avant
+      const newDevices = Array.from(this.devices.values())
+        .filter(device => !existingIndices.has(device.index));
+      
+      if (newDevices.length > 0) {
         this.notify?.('status:buttplug', { 
-          message: `Found ${newCount} new device(s)`, 
+          message: `Found ${newDevices.length} new device(s)`, 
           type: 'success' 
         });
       } else {
@@ -181,10 +189,9 @@ class ButtPlugManager {
         });
       }
       
-      const allDevices = Array.from(this.devices.values());
-      return allDevices.slice(-newCount);
+      return newDevices;
+      
     } catch (error) {
-      // ✅ NOUVEAU: Erreur scan
       this.notify?.('status:buttplug', { 
         message: 'Device scan failed', 
         type: 'error',

@@ -433,8 +433,6 @@ class MediaPlayer extends Component {
         throw new Error('Failed to create Video.js player instance');
       }
 
-      this.setupBasicCallbacks();
-
       this.player.ready(() => {
         if (this.isDestroyed) return;
 
@@ -444,9 +442,10 @@ class MediaPlayer extends Component {
         
         this.notify?.('status:media', { message: 'Video.js player ready', type: 'success' });
         
-        this.setupAdvancedCallbacks();
-        
         this.initPlugins().then(() => {
+          // ✅ CORRIGÉ: Callbacks après plugins pour supporter playlist events
+          this.setupCallbacks();
+          
           this.notify?.('status:media', { message: 'Video.js player initialization complete', type: 'success' });
           this._triggerRender();
         }).catch((error) => {
@@ -555,31 +554,22 @@ class MediaPlayer extends Component {
   // CALLBACKS
   // ============================================================================
 
-  setupBasicCallbacks = () => {
+  setupCallbacks = () => {
     if (!this.player) return;
+
+    // ============================================================================
+    // ERROR EVENTS (en premier pour capturer les erreurs setup)
+    // ============================================================================
     
     this.player.on('error', (error) => {
       this.notify?.('status:media', { message: 'Video.js player error occurred', type: 'error', error: error?.message || 'Unknown Video.js error' });
       this.props.onError?.(error);
     });
-  }
 
-  setupAdvancedCallbacks = () => {
-    if (!this.player) return;
-
-    this.player.on('loadedmetadata', () => {
-      const duration = this.player.duration() || 0;
-      this.notify?.('status:media', { message: `Media loaded: ${duration.toFixed(1)}s duration`, type: 'success' });
-      
-      this.updatePlaylistButtons();
-      this._triggerRender();
-      
-      this.props.onLoadEnd?.({ 
-        duration, 
-        type: this._isPlaylistMode() ? 'playlist' : 'media' 
-      });
-    });
-
+    // ============================================================================
+    // PLAYBACK CONTROL EVENTS
+    // ============================================================================
+    
     this.player.on('play', () => {
       const currentTime = this.player.currentTime() || 0;
       this.notify?.('status:media', { message: `Playback started at ${currentTime.toFixed(1)}s`, type: 'log' });
@@ -597,31 +587,67 @@ class MediaPlayer extends Component {
 
     this.player.on('ended', () => {
       this.notify?.('status:media', { message: 'Media playback ended', type: 'info' });
-      this.props.onEnd?.({ currentTime: 0 });
+      this.props.onEnded?.({ currentTime: 0 });
+    });
+
+    // ============================================================================
+    // SEEKING EVENTS
+    // ============================================================================
+    
+    this.player.on('seeking', () => {
+      const currentTime = this.player.currentTime() || 0;
+      this.notify?.('status:media', { message: `Seeking to ${currentTime.toFixed(1)}s`, type: 'log' });
+      this.props.onSeeking?.({ currentTime });
     });
 
     this.player.on('seeked', () => {
       const currentTime = this.player.currentTime() || 0;
       this.notify?.('status:media', { message: `Seeked to ${currentTime.toFixed(1)}s`, type: 'log' });
       
-      this.props.onSeek?.({ currentTime });
+      this.props.onSeeked?.({ currentTime });
     });
 
+    // ============================================================================
+    // TIME EVENTS
+    // ============================================================================
+    
     this.player.on('timeupdate', () => {
       const currentTime = this.player.currentTime() || 0;
       this.props.onTimeUpdate?.({ currentTime });
     });
 
-    // Media loading events
-    this.player.on('loadstart', () => {
-      this.notify?.('status:media', { message: 'Media loading started', type: 'log' });
+    this.player.on('durationchange', () => {
+      const duration = this.player.duration() || 0;
+      this.notify?.('status:media', { message: `Duration changed: ${duration.toFixed(1)}s`, type: 'log' });
+      this.props.onDurationChange?.({ duration });
     });
 
-    // ✅ MODIFIÉ: Émettre callbacks pour gestion buffering
-    this.player.on('waiting', () => {
-      const currentTime = this.player.currentTime() || 0;
-      this.notify?.('status:media', { message: 'Media buffering...', type: 'log' });
-      this.props.onWaiting?.({ currentTime });
+    // ============================================================================
+    // LOADING EVENTS
+    // ============================================================================
+    
+    this.player.on('loadstart', () => {
+      this.notify?.('status:media', { message: 'Media loading started', type: 'log' });
+      this.props.onLoadStart?.({ });
+    });
+
+    this.player.on('loadeddata', () => {
+      const duration = this.player.duration() || 0;
+      this.notify?.('status:media', { message: 'Media data loaded', type: 'log' });
+      this.props.onLoadedData?.({ duration });
+    });
+
+    this.player.on('loadedmetadata', () => {
+      const duration = this.player.duration() || 0;
+      this.notify?.('status:media', { message: `Media loaded: ${duration.toFixed(1)}s duration`, type: 'success' });
+      
+      this.updatePlaylistButtons();
+      this._triggerRender();
+      
+      this.props.onLoadedMetadata?.({ 
+        duration, 
+        type: this._isPlaylistMode() ? 'playlist' : 'media' 
+      });
     });
 
     this.player.on('canplay', () => {
@@ -629,6 +655,93 @@ class MediaPlayer extends Component {
       this.notify?.('status:media', { message: 'Media ready to play', type: 'log' });
       this.props.onCanPlay?.({ currentTime });
     });
+
+    this.player.on('canplaythrough', () => {
+      const currentTime = this.player.currentTime() || 0;
+      this.notify?.('status:media', { message: 'Media can play through', type: 'log' });
+      this.props.onCanPlayThrough?.({ currentTime });
+    });
+
+    // ============================================================================
+    // BUFFERING EVENTS
+    // ============================================================================
+    
+    this.player.on('waiting', () => {
+      const currentTime = this.player.currentTime() || 0;
+      this.notify?.('status:media', { message: 'Media buffering...', type: 'log' });
+      this.props.onWaiting?.({ currentTime });
+    });
+
+    this.player.on('stalled', () => {
+      const currentTime = this.player.currentTime() || 0;
+      this.notify?.('status:media', { message: 'Media connection stalled', type: 'warning' });
+      this.props.onStalled?.({ currentTime });
+    });
+
+    this.player.on('suspend', () => {
+      const currentTime = this.player.currentTime() || 0;
+      this.notify?.('status:media', { message: 'Media loading suspended', type: 'log' });
+      this.props.onSuspend?.({ currentTime });
+    });
+
+    // ============================================================================
+    // VOLUME EVENTS
+    // ============================================================================
+    
+    this.player.on('volumechange', () => {
+      const volume = this.player.volume();
+      const muted = this.player.muted();
+      this.notify?.('status:media', { message: `Volume: ${muted ? 'muted' : Math.round(volume * 100) + '%'}`, type: 'log' });
+      this.props.onVolumeChange?.({ volume, muted });
+    });
+
+    // ============================================================================
+    // ERROR EVENTS
+    // ============================================================================
+    
+    this.player.on('error', (error) => {
+      this.notify?.('status:media', { message: 'Video.js player error occurred', type: 'error', error: error?.message || 'Unknown Video.js error' });
+      this.props.onError?.(error);
+    });
+
+    // ============================================================================
+    // SIZE EVENTS
+    // ============================================================================
+    
+    this.player.on('resize', () => {
+      const dimensions = {
+        width: this.player.currentWidth(),
+        height: this.player.currentHeight()
+      };
+      this.notify?.('status:media', { message: `Player resized: ${dimensions.width}x${dimensions.height}`, type: 'log' });
+      this.props.onResize?.(dimensions);
+    });
+
+    // ============================================================================
+    // PLAYLIST EVENTS - ✅ Événements playlist spécifiques FunPlayer
+    // ============================================================================
+    
+    // Setup playlist callbacks si playlist plugin est disponible
+    if (this.player.playlist) {
+      this.player.on('playlistitem', (event) => {
+        const currentIndex = this.player.playlist.currentItem();
+        const totalItems = this.player.playlist().length;
+        
+        this.notify?.('status:media', { 
+          message: `Playlist item changed: ${currentIndex + 1}/${totalItems}`, 
+          type: 'info' 
+        });
+        
+        this.updatePlaylistButtons();
+        this._triggerRender();
+        
+        this.props.onPlaylistItemChange?.({ 
+          index: currentIndex,
+          total: totalItems,
+          item: this.player.playlist()[currentIndex]
+        });
+      });
+    }
   }
 
   // ============================================================================
@@ -699,36 +812,19 @@ class MediaPlayer extends Component {
   // ============================================================================
 
   render() {
-    const { className = '' } = this.props;
-    
     const hasContent = this._hasValidPlaylist();
     
     return (
-      <div className={`media-player ${className}`}>
+      <div className='fp-media-player'>
         {hasContent ? (
-          <div data-vjs-player>
-            <video
-              ref={this.videoRef}
-              className="video-js vjs-default-skin vjs-theme-funplayer"
-              playsInline
-              data-setup="{}"
-            />
-          </div>
+          <video
+            ref={this.videoRef}
+            className="video-js vjs-default-skin fp-media-player-video"
+            playsInline
+            data-setup="{}"
+          />
         ) : (
-          <div 
-            className="media-placeholder"
-            style={{
-              width: '100%',
-              height: '300px',
-              backgroundColor: '#000',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#666',
-              fontSize: '1rem',
-              borderRadius: 'calc(var(--base-radius) * 0.5)'
-            }}
-          >
+          <div className="fp-media-player-placeholder">
             📁 No media loaded
           </div>
         )}

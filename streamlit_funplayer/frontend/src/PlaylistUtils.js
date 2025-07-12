@@ -183,12 +183,8 @@ class PlaylistUtils {
       
       // Convertir ms en secondes et ajouter un petit buffer
       const durationSeconds = maxTime > 0 ? (maxTime / 1000) + 1 : 0;
-      
-      console.log(`MediaUtils: Extracted funscript duration: ${durationSeconds.toFixed(2)}s (from ${maxTime}ms)`);
-      return durationSeconds;
-      
+      return durationSeconds;      
     } catch (error) {
-      console.error('MediaUtils: Error extracting funscript duration:', error);
       return 0;
     }
   }
@@ -242,7 +238,6 @@ class PlaylistUtils {
           
           if (dataURL && dataURL.length > 1000) {
             const sizeKB = Math.round(dataURL.length * 0.75 / 1024);
-            console.log(`MediaUtils: Generated poster (${sizeKB}KB)`);
             cleanup();
             resolve(dataURL);
           } else {

@@ -1,7 +1,8 @@
 import React from 'react';
 import { Streamlit, StreamlitComponentBase, withStreamlitConnection } from 'streamlit-component-lib';
 import FunPlayer from './FunPlayer';
-import './theme.css';
+import ThemeUtils from './ThemeUtils';
+import './funplayer.scss';
 
 class StreamlitFunPlayer extends StreamlitComponentBase {
   constructor(props) {
@@ -88,74 +89,62 @@ class StreamlitFunPlayer extends StreamlitComponentBase {
 
     const themeVars = {};
     
+    // ✅ MODIFIÉ: Utilisation de ThemeUtils pour les variables préfixées
     if (theme.primaryColor) {
-      themeVars['--primary-color'] = theme.primaryColor;
-      themeVars['--hover-color'] = this.hexToRgba(theme.primaryColor, 0.1);
-      themeVars['--active-color'] = this.hexToRgba(theme.primaryColor, 0.2);
+      themeVars['--fp-primary-color'] = theme.primaryColor;  // ✅ Préfixé
+      themeVars['--fp-hover-color'] = ThemeUtils.hexToRgba(theme.primaryColor, 0.1);  // ✅ ThemeUtils
+      themeVars['--fp-active-color'] = ThemeUtils.hexToRgba(theme.primaryColor, 0.2);  // ✅ ThemeUtils + préfixé
     }
     
     if (theme.backgroundColor) {
-      themeVars['--background-color'] = theme.backgroundColor;
+      themeVars['--fp-background-color'] = theme.backgroundColor;  // ✅ Préfixé
     }
     
     if (theme.secondaryBackgroundColor) {
-      themeVars['--secondary-background-color'] = theme.secondaryBackgroundColor;
+      themeVars['--fp-secondary-background-color'] = theme.secondaryBackgroundColor;  // ✅ Préfixé
     }
     
     if (theme.textColor) {
-      themeVars['--text-color'] = theme.textColor;
-      themeVars['--disabled-color'] = this.hexToRgba(theme.textColor, 0.3);
+      themeVars['--fp-text-color'] = theme.textColor;  // ✅ Préfixé
+      themeVars['--fp-disabled-color'] = ThemeUtils.hexToRgba(theme.textColor, 0.3);  // ✅ ThemeUtils + préfixé
     }
     
     if (theme.borderColor) {
-      themeVars['--border-color'] = theme.borderColor;
+      themeVars['--fp-border-color'] = theme.borderColor;  // ✅ Préfixé
     }
     
     if (theme.font) {
-      themeVars['--font-family'] = theme.font;
+      themeVars['--fp-font-family'] = theme.font;  // ✅ Préfixé
     }
     
     if (theme.baseRadius) {
-      themeVars['--base-radius'] = theme.baseRadius;
+      themeVars['--fp-base-radius'] = theme.baseRadius;  // ✅ Préfixé
     }
     
     return themeVars;
   };
 
-  hexToRgba = (hex, alpha) => {
-    if (!hex) return null;
-    
-    hex = hex.replace('#', '');
-    const r = parseInt(hex.substr(0, 2), 16);
-    const g = parseInt(hex.substr(2, 2), 16);
-    const b = parseInt(hex.substr(4, 2), 16);
-    
-    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
-  };
-
   convertCustomTheme = (theme) => {
+    // ✅ SIMPLIFIÉ: Utilisation de ThemeUtils pour validation et conversion
+    const sanitizedTheme = ThemeUtils.sanitizeTheme(theme);
+    if (!ThemeUtils.isValidTheme(sanitizedTheme)) return {};
+    
     const themeVars = {};
     
-    const mappings = {
-      'primaryColor': '--primary-color',
-      'backgroundColor': '--background-color', 
-      'secondaryBackgroundColor': '--secondary-background-color',
-      'textColor': '--text-color',
-      'borderColor': '--border-color',
-      'fontFamily': '--font-family',
-      'baseRadius': '--base-radius',
-      'spacing': '--spacing'
-    };
-    
-    Object.entries(mappings).forEach(([key, cssVar]) => {
-      if (theme[key]) {
-        themeVars[cssVar] = theme[key];
+    // ✅ SIMPLIFIÉ: Utilisation directe de ThemeUtils.convertToCssVar
+    Object.entries(sanitizedTheme).forEach(([key, cssVar]) => {
+      if (key !== 'base') {
+        const cssVarName = ThemeUtils.convertToCssVar(key);
+        themeVars[cssVarName] = sanitizedTheme[key];
       }
     });
     
-    if (theme.primaryColor) {
-      themeVars['--hover-color'] = this.hexToRgba(theme.primaryColor, 0.1);
-      themeVars['--focus-color'] = this.hexToRgba(theme.primaryColor, 0.25);
+    // ✅ SIMPLIFIÉ: Couleurs dérivées via ThemeUtils
+    if (sanitizedTheme.primaryColor) {
+      const hoverColor = ThemeUtils.hexToRgba(sanitizedTheme.primaryColor, 0.1);
+      const focusColor = ThemeUtils.hexToRgba(sanitizedTheme.primaryColor, 0.25);
+      if (hoverColor) themeVars['--fp-hover-color'] = hoverColor;
+      if (focusColor) themeVars['--fp-focus-color'] = focusColor;
     }
     
     return themeVars;

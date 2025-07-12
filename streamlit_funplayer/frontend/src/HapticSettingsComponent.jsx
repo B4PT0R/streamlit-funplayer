@@ -2,14 +2,13 @@ import React, { Component } from 'react';
 import ButtPlugSettingsComponent from './ButtPlugSettingsComponent';
 import ActuatorSettingsComponent from './ActuatorSettingsComponent';
 import ChannelSettingsComponent from './ChannelSettingsComponent'; // ✅ NOUVEAU: Import du composant de config des canaux
-import core from './FunPlayerCore';
 
 /**
- * HapticSettingsComponent - ✅ NETTOYÉ: UI pure sans notifications
+ * HapticSettingsComponent - ✅ NETTOYÉ: UI pure sans notifications sauf resize
  * 
  * RESPONSABILITÉS SIMPLIFIÉES:
  * - Orchestrateur UI simple (ButtPlug + Actuators + Channel Settings)
- * - Appels directs core.xxx (pas d'indirections)
+ * - Appels directs this.core.xxx (pas d'indirections)
  * - Re-render intelligent sur événements globaux uniquement
  * - ✅ CLEAN: Pas de notifications status (c'est aux managers de le faire)
  * - Laisse les sous-composants gérer leurs propres événements granulaires
@@ -17,6 +16,8 @@ import core from './FunPlayerCore';
 class HapticSettingsComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       isExpanded: false,
@@ -27,7 +28,7 @@ class HapticSettingsComponent extends Component {
   }
 
   componentDidMount() {
-    this.coreListener = core.addListener(this.handleEvent);
+    this.coreListener = this.core.addListener(this.handleEvent);
   }
 
   componentWillUnmount() {
@@ -79,14 +80,18 @@ class HapticSettingsComponent extends Component {
 
   handleToggleExpanded = () => {
     this.setState({ isExpanded: !this.state.isExpanded }, () => {
-      this.props.onResize?.();
+      // ✅ ANCIEN: this.props.onResize?.();
+      // ✅ NOUVEAU: Bus d'événements
+      this.core.notify('component:resize', {
+        source: 'HapticSettingsComponent',
+        reason: `main-settings-${this.state.isExpanded ? 'expanded' : 'collapsed'}`
+      });
     });
   }
 
   handleAutoMap = () => {
     // Appel direct core - les notifications seront faites par FunPlayerCore
-    const mapResult = core.autoMapChannels();
-    console.log('Auto-map result:', mapResult);
+    const mapResult = this.core.autoMapChannels();
   }
 
   handleUpdateRateChange = (newRate) => {
@@ -96,218 +101,226 @@ class HapticSettingsComponent extends Component {
 
   handleGlobalScaleChange = (scale) => {
     // Appel direct core - les notifications seront faites par ButtPlugManager
-    core.buttplug.setGlobalScale(scale);
+    this.core.buttplug.setGlobalScale(scale);
   }
 
   handleGlobalOffsetChange = (offset) => {
     // Appel direct core - les notifications seront faites par ButtPlugManager
-    core.buttplug.setGlobalOffset(offset);
+    this.core.buttplug.setGlobalOffset(offset);
   }
 
   handleIntifaceUrlChange = (newUrl) => {
     // Appel direct core - les notifications seront faites par ButtPlugManager
-    core.buttplug.setIntifaceUrl(newUrl);
+    this.core.buttplug.setIntifaceUrl(newUrl);
   }
 
   // ============================================================================
-  // RENDER SIMPLIFIÉ - Accès direct aux données via core
+  // RENDER PRINCIPAL - Déjà clean
   // ============================================================================
-
-  renderExpandedSettings() {
-    if (!this.state.isExpanded) return null;
-    
-    // Accès direct core pour toutes les données globales
-    const funscriptChannels = core.funscript.getChannelNames();
-    const actuators = core.buttplug.getActuators();
-    const updateRate = this.props.onGetUpdateRate?.() || 60;
-    const globalOffset = core.buttplug.getGlobalOffset();
-    const globalScale = core.buttplug.getGlobalScale();
-    const intifaceUrl = core.buttplug.getIntifaceUrl();
-    const isConnected = core.buttplug.getStatus()?.isConnected || false;
-    
-    return (
-      <div className="fp-block fp-section">
-        
-        {/* Global Settings */}
-        <div className="fp-layout-horizontal fp-mb-sm">
-          <h6 className="fp-title">⚙️ Connection</h6>
-        </div>
-        
-        {/* Intiface URL + Update Rate */}
-        <div className="fp-layout-row fp-mb-lg">
-          
-          {/* Intiface WebSocket URL */}
-          <div className="fp-layout-column fp-flex">
-            <label className="fp-label">Intiface WebSocket URL</label>
-            <div className="fp-layout-row">
-              <input
-                className="fp-input fp-flex"
-                type="text"
-                value={intifaceUrl}
-                onChange={(e) => this.handleIntifaceUrlChange(e.target.value)}
-                placeholder="ws://localhost:12345"
-                title="WebSocket URL for Intiface Central connection"
-              />
-              <button
-                className="fp-btn fp-btn-compact"
-                onClick={() => this.handleIntifaceUrlChange('ws://localhost:12345')}
-                title="Reset to default"
-              >
-                🔄
-              </button>
-            </div>
-            <span className="fp-unit" style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-              {isConnected ? 
-                `✅ Connected to ${intifaceUrl}` : 
-                `⚠️ Not connected`
-              }
-            </span>
-          </div>
-          
-          {/* Update Rate */}
-          <div className="fp-layout-column fp-no-shrink" style={{ minWidth: '120px' }}>
-            <label className="fp-label">Update Rate</label>
-            <select 
-              className="fp-input fp-select"
-              value={updateRate} 
-              onChange={(e) => this.handleUpdateRateChange(parseInt(e.target.value))}
-              title="Haptic command frequency (higher = smoother but more CPU)"
-            >
-              <option value={10}>10 Hz</option>
-              <option value={30}>30 Hz</option>
-              <option value={60}>60 Hz</option>
-              <option value={90}>90 Hz</option>
-              <option value={120}>120 Hz</option>
-            </select>
-            <span className="fp-unit" style={{ fontSize: '0.7rem', opacity: 0.6 }}>
-              {(1000/updateRate).toFixed(1)}ms interval
-            </span>
-          </div>
-          
-        </div>
-
-        <div className="fp-divider"></div>
-
-        <div className="fp-layout-horizontal fp-mb-sm">
-          <h6 className="fp-title">📊 Master</h6>
-        </div>
-        
-        {/* Global Scale + Global Offset */}
-        <div className="fp-layout-row fp-mb-lg">
-          
-          {/* Global Scale */}
-          <div className="fp-layout-column fp-flex">
-            <label className="fp-label">
-              Global Scale: {((globalScale || 1) * 100).toFixed(0)}%
-            </label>
-            <div className="fp-layout-row">
-              <input
-                className="fp-input fp-range fp-flex"
-                type="range"
-                min="0"
-                max="2"
-                step="0.01"
-                value={globalScale || 1}
-                onChange={(e) => this.handleGlobalScaleChange(parseFloat(e.target.value))}
-                title="Master intensity control for all actuators"
-              />
-              <input
-                className="fp-input fp-input-number"
-                type="number"
-                value={globalScale || 1}
-                onChange={(e) => this.handleGlobalScaleChange(parseFloat(e.target.value) || 1)}
-                step="0.01"
-                min="0"
-                max="2"
-              />
-            </div>
-          </div>
-          
-          {/* Global Offset */}
-          <div className="fp-layout-column fp-flex">
-            <label className="fp-label">
-              Global Offset: {((globalOffset || 0) * 1000).toFixed(0)}ms
-            </label>
-            <div className="fp-layout-row">
-              <input
-                className="fp-input fp-range fp-flex"
-                type="range"
-                value={globalOffset || 0}
-                onChange={(e) => this.handleGlobalOffsetChange(parseFloat(e.target.value))}
-                min="-1"
-                max="1"
-                step="0.01"
-                title="Global timing offset for all actuators"
-              />
-              <input
-                className="fp-input fp-input-number"
-                type="number"
-                value={globalOffset || 0}
-                onChange={(e) => this.handleGlobalOffsetChange(parseFloat(e.target.value) || 0)}
-                step="0.01"
-                min="-1"
-                max="1"
-              />
-            </div>
-          </div>
-          
-        </div>
-
-        {/* ✅ NOUVEAU: Section Channel Configuration */}
-        {funscriptChannels.length > 0 && (
-          <>
-            <div className="fp-divider"></div>
-            <ChannelSettingsComponent onResize={this.props.onResize} />
-          </>
-        )}
-
-        {/* Section actuators: Ne re-render que si structure change */}
-        {funscriptChannels.length > 0 && (
-          <>
-            <div className="fp-divider"></div>
-            
-            <div className="fp-layout-horizontal fp-mb-sm">
-              <h6 className="fp-title">🎮 Actuators</h6>
-              <button 
-                className="fp-btn fp-btn-compact"
-                onClick={this.handleAutoMap}
-              >
-                Auto Map All ({actuators.length})
-              </button>
-            </div>
-            
-            <div className="fp-layout-column fp-layout-compact">
-              {/* Boucle directe sur les instances 
-                   Chaque ActuatorSettingsComponent gère ses propres événements granulaires */}
-              {actuators.map(actuator => (
-                <ActuatorSettingsComponent
-                  key={actuator.index}
-                  actuator={actuator}  // Instance directe
-                  onResize={this.props.onResize}
-                />
-              ))}
-            </div>
-          </>
-        )}
-        
-      </div>
-    );
-  }
-
   render() {
     const { isExpanded } = this.state;
     
     return (
-      <div className="haptic-settings">
+      <div className="fp-haptic-settings">
         
         {/* Barre principale */}
         <ButtPlugSettingsComponent
+          core={this.core}
           onToggleSettings={this.handleToggleExpanded}
           isSettingsExpanded={isExpanded}
         />
         
         {/* Settings détaillés */}
         {this.renderExpandedSettings()}
+        
+      </div>
+    );
+  }
+
+  // ============================================================================
+  // SETTINGS EXPANDUS - Suppression de tout le sur-nesting
+  // ============================================================================
+  renderExpandedSettings() {
+    if (!this.state.isExpanded) return null;
+    
+    // Accès direct core pour toutes les données globales
+    const funscriptChannels = this.core.funscript.getChannelNames();
+    const actuators = this.core.buttplug.getActuators();
+    const updateRate = this.props.onGetUpdateRate?.() || 60;
+    const globalOffset = this.core.buttplug.getGlobalOffset();
+    const globalScale = this.core.buttplug.getGlobalScale();
+    const intifaceUrl = this.core.buttplug.getIntifaceUrl();
+    const isConnected = this.core.buttplug.getStatus()?.isConnected || false;
+    
+    return (
+      <div className="fp-haptic-settings-expanded">
+        
+        {/* Section Connection */}
+        <div className="fp-haptic-settings-connection-section">
+          <h6 className="fp-haptic-settings-section-title">⚙️ Connection</h6>
+          
+          {/* Intiface URL + Update Rate */}
+          <div className="fp-haptic-settings-connection-controls">
+            
+            {/* Intiface WebSocket URL */}
+            <div className="fp-haptic-settings-url-control">
+              <label className="fp-haptic-settings-url-label">Intiface WebSocket URL</label>
+              <div className="fp-haptic-settings-url-input-group">
+                <input
+                  className="fp-haptic-settings-url-input"
+                  type="text"
+                  value={intifaceUrl}
+                  onChange={(e) => this.handleIntifaceUrlChange(e.target.value)}
+                  placeholder="ws://localhost:12345"
+                  title="WebSocket URL for Intiface Central connection"
+                />
+                <button
+                  className="fp-haptic-settings-url-reset-btn"
+                  onClick={() => this.handleIntifaceUrlChange('ws://localhost:12345')}
+                  title="Reset to default"
+                >
+                  🔄
+                </button>
+              </div>
+              <span className="fp-haptic-settings-url-status">
+                {isConnected ? 
+                  `✅ Connected to ${intifaceUrl}` : 
+                  `⚠️ Not connected`
+                }
+              </span>
+            </div>
+            
+            {/* Update Rate */}
+            <div className="fp-haptic-settings-rate-control">
+              <label className="fp-haptic-settings-rate-label">Update Rate</label>
+              <select 
+                className="fp-haptic-settings-rate-select"
+                value={updateRate} 
+                onChange={(e) => this.handleUpdateRateChange(parseInt(e.target.value))}
+                title="Haptic command frequency (higher = smoother but more CPU)"
+              >
+                <option value={10}>10 Hz</option>
+                <option value={30}>30 Hz</option>
+                <option value={60}>60 Hz</option>
+                <option value={90}>90 Hz</option>
+                <option value={120}>120 Hz</option>
+              </select>
+              <span className="fp-haptic-settings-rate-info">
+                {(1000/updateRate).toFixed(1)}ms interval
+              </span>
+            </div>
+            
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="fp-haptic-settings-divider"></div>
+
+        {/* Section Master */}
+        <div className="fp-haptic-settings-master-section">
+          <h6 className="fp-haptic-settings-section-title">📊 Master</h6>
+          
+          {/* Global Scale + Global Offset */}
+          <div className="fp-haptic-settings-master-controls">
+            
+            {/* Global Scale */}
+            <div className="fp-haptic-settings-scale-control">
+              <label className="fp-haptic-settings-scale-label">
+                Global Scale: {((globalScale || 1) * 100).toFixed(0)}%
+              </label>
+              <div className="fp-haptic-settings-scale-input-group">
+                <input
+                  className="fp-haptic-settings-scale-range"
+                  type="range"
+                  min="0"
+                  max="2"
+                  step="0.01"
+                  value={globalScale || 1}
+                  onChange={(e) => this.handleGlobalScaleChange(parseFloat(e.target.value))}
+                  title="Master intensity control for all actuators"
+                />
+                <input
+                  className="fp-haptic-settings-scale-number"
+                  type="number"
+                  value={globalScale || 1}
+                  onChange={(e) => this.handleGlobalScaleChange(parseFloat(e.target.value) || 1)}
+                  step="0.01"
+                  min="0"
+                  max="2"
+                />
+              </div>
+            </div>
+            
+            {/* Global Offset */}
+            <div className="fp-haptic-settings-offset-control">
+              <label className="fp-haptic-settings-offset-label">
+                Global Offset: {((globalOffset || 0) * 1000).toFixed(0)}ms
+              </label>
+              <div className="fp-haptic-settings-offset-input-group">
+                <input
+                  className="fp-haptic-settings-offset-range"
+                  type="range"
+                  value={globalOffset || 0}
+                  onChange={(e) => this.handleGlobalOffsetChange(parseFloat(e.target.value))}
+                  min="-1"
+                  max="1"
+                  step="0.01"
+                  title="Global timing offset for all actuators"
+                />
+                <input
+                  className="fp-haptic-settings-offset-number"
+                  type="number"
+                  value={globalOffset || 0}
+                  onChange={(e) => this.handleGlobalOffsetChange(parseFloat(e.target.value) || 0)}
+                  step="0.01"
+                  min="-1"
+                  max="1"
+                />
+              </div>
+            </div>
+            
+          </div>
+        </div>
+        
+        {/* Section Channel Configuration */}
+        {funscriptChannels.length > 0 && (
+          <>
+            <div className="fp-haptic-settings-divider"></div>
+            <div className="fp-haptic-settings-channels-header">
+              <h6 className="fp-haptic-settings-section-title">🎼 Channels</h6>
+            </div>
+            <ChannelSettingsComponent core={this.core}/>
+          </>
+        )}
+
+        {/* Section Actuators */}
+        {funscriptChannels.length > 0 && (
+          <>
+            <div className="fp-haptic-settings-divider"></div>
+            
+            <div className="fp-haptic-settings-actuators-section">
+              <div className="fp-haptic-settings-actuators-header">
+                <h6 className="fp-haptic-settings-section-title">🎮 Actuators</h6>
+                <button 
+                  className="fp-haptic-settings-automap-btn"
+                  onClick={this.handleAutoMap}
+                >
+                  Auto Map All ({actuators.length})
+                </button>
+              </div>
+              
+              <div className="fp-haptic-settings-actuators-list">
+                {actuators.map(actuator => (
+                  <ActuatorSettingsComponent
+                    core={this.core}
+                    key={actuator.index}
+                    actuator={actuator}
+                  />
+                ))}
+              </div>
+            </div>
+          </>
+        )}
         
       </div>
     );

@@ -9,7 +9,7 @@ A modern React component for synchronized media and haptic playback with profess
 
 ## Overview
 
-FunPlayer is a sophisticated media player that synchronizes audio/video content with haptic feedback devices through the Buttplug.io ecosystem. Built with modern React architecture and optimized for real-time performance, it supports everything from simple media playback to complex multi-channel haptic orchestration.
+FunPlayer is a versatile media player based on Video.js that synchronizes audio/video content with haptic feedback devices through the Buttplug.io ecosystem. Built with modern React architecture and optimized for real-time performance, it supports everything from simple media playback to complex multi-channel haptic orchestration.
 
 **Key Differentiators:**
 - 🎯 **React-first architecture** with Streamlit wrapper for Python integration
@@ -58,8 +58,7 @@ playlist = [
     ),
     create_playlist_item(
         funscript={"actions": [{"at": 0, "pos": 50}]},  # Haptic-only
-        name="Pure Haptic Experience",
-        duration=30.0
+        name="Pure Haptic Experience"
     )
 ]
 

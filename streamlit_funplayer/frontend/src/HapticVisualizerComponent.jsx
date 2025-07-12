@@ -3,6 +3,8 @@ import React, { Component } from 'react';
 class HapticVisualizerComponent extends Component {
   constructor(props) {
     super(props);
+
+    this.core=props.core
     
     this.state = {
       isPlaying: false,
@@ -16,22 +18,29 @@ class HapticVisualizerComponent extends Component {
     // Animation
     this.animationId = null;
     
-    // Trail system
-    this.trailHistory = [];
-    this.maxTrailFrames = 8;
+    // ✅ SUPPRIMÉ: Trail system (trailHistory, maxTrailFrames)
     
-    // Configuration - ✅ MODIFIÉ: Plus de couleurs fixes par type
+    // Configuration - ✅ AJOUT: Rainbow rotation
     this.config = {
       resolution: 300,
       heightScale: 0.95,
-      trailDecay: 0.85,
       sigmaMin: 0.07,
       sigmaMax: 0.15,
-      rainbowIntensity: 0.15  // ✅ NOUVEAU: Intensité du talon arc-en-ciel
+      rainbowIntensity: 0.25,
+      rainbowRotation: 0.0  // ✅ NOUVEAU: Rotation de l'arc-en-ciel (0 à 1)
     };
     
     // Cache de normalisation
     this.normalizationCache = new Map();
+    
+    // ✅ NOUVEAU: Cache des couleurs pour performance
+    this.colorCache = {
+      rainbowColors: null,    // Array[resolution+1] des couleurs arc-en-ciel
+      actuatorColors: null,   // Map des couleurs par position µ
+      lastRotation: -1,
+      lastResolution: -1,
+      lastNActive: -1         // ✅ AJOUT: Nombre d'actuateurs actifs
+    };
   }
 
   // ============================================================================
@@ -47,15 +56,21 @@ class HapticVisualizerComponent extends Component {
     const isPlaying = this.props.isPlaying || false;
     if (isPlaying !== this.state.isPlaying) {
       this.setState({ isPlaying });
-      if (!isPlaying) {
-        this.trailHistory = [];
-      }
+    }
+    if (prevProps.visible !== this.props.visible) {
+      this.core.notify('component:resize', {
+        source: 'HapticVisualizerComponent',
+        reason: `visibility-${this.props.visible ? 'shown' : 'hidden'}`
+      });
     }
   }
 
   componentWillUnmount() {
+    // ✅ AMÉLIORÉ: Cleanup plus explicite
     if (this.animationId) {
       cancelAnimationFrame(this.animationId);
+      this.animationId = null;
+      console.log('🧹 HapticVisualizer animation cleanup completed');
     }
   }
 
@@ -100,13 +115,11 @@ class HapticVisualizerComponent extends Component {
     return (index + 1) / (total + 1);
   }
 
-  // ✅ NOUVEAU: Récupération des données via callback
   getCurrentActuatorData = () => {
     return this.props.getCurrentActuatorData?.() || new Map();
   }
 
   getConfiguredActuatorCount = () => {
-    // Nombre d'actuators dans actuatorData = nombre configuré et enabled
     const actuatorData = this.getCurrentActuatorData();
     return Math.max(1, actuatorData.size);
   }
@@ -137,70 +150,120 @@ class HapticVisualizerComponent extends Component {
   }
 
   // ============================================================================
-  // RENDU - INCHANGÉ
+  // RENDU - SIMPLIFIÉ
   // ============================================================================
 
   getActiveActuators = (actuatorData) => {
-    return Array.from(actuatorData.entries())
-      .filter(([_, data]) => Math.abs(data.value) > 0.001);
+    // ✅ CORRIGÉ: Un actuateur est actif s'il est présent dans actuatorData
+    // peu importe sa valeur (peut être 0)
+    return Array.from(actuatorData.entries());
   }
 
-  // ✅ NOUVEAU: Couleur avec effet arc-en-ciel de fond
+  // ============================================================================
+  // CACHE DES COULEURS POUR PERFORMANCE
+  // ============================================================================
+
+  rebuildColorCache = () => {
+    const { resolution, rainbowRotation } = this.config;
+    
+    // Cache arc-en-ciel (resolution+1 points)
+    this.colorCache.rainbowColors = Array.from({length: resolution + 1}, (_, i) => 
+      this.getColorAt(i / resolution)
+    );
+    
+    // Cache couleurs actuateurs (positions µ typiques)
+    this.colorCache.actuatorColors = new Map();
+    for (let nActuators = 1; nActuators <= 8; nActuators++) {
+      for (let i = 0; i < nActuators; i++) {
+        const mu = this.getActuatorPosition(i, nActuators);
+        const color = this.getColorAt(mu);
+        this.colorCache.actuatorColors.set(`${nActuators}-${i}`, color);
+      }
+    }
+    
+    // Marquer comme à jour
+    this.colorCache.lastRotation = rainbowRotation;
+    this.colorCache.lastResolution = resolution;
+  }
+
+  ensureColorCache = (nActive) => {
+    const { resolution, rainbowRotation } = this.config;
+    
+    if (this.colorCache.lastRotation !== rainbowRotation || 
+        this.colorCache.lastResolution !== resolution ||
+        this.colorCache.lastNActive !== nActive) {
+      this.rebuildColorCache();
+      this.colorCache.lastNActive = nActive;  // ✅ AJOUT: Sauvegarder nActive
+    }
+  }
+
+  getCachedRainbowColor = (xIndex) => {
+    return this.colorCache.rainbowColors[xIndex];
+  }
+
+  getCachedActuatorColor = (nActuators, actuatorIndex, intensity = 1) => {
+    const baseColor = this.colorCache.actuatorColors.get(`${nActuators}-${actuatorIndex}`);
+    if (!baseColor) return [255, 255, 255]; // Fallback blanc
+    
+    return [
+      Math.round(baseColor[0] * intensity),
+      Math.round(baseColor[1] * intensity),
+      Math.round(baseColor[2] * intensity)
+    ];
+  }
+
+  // ============================================================================
+  // SYSTÈME DE COULEURS CENTRALISÉ - HSV pour arc-en-ciel smooth
+  // ============================================================================
+
+  hsvToRgb = (h, s, v) => {
+    const c = v * s;
+    const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    const m = v - c;
+    
+    let r, g, b;
+    
+    if (h >= 0 && h < 60) {
+      [r, g, b] = [c, x, 0];
+    } else if (h >= 60 && h < 120) {
+      [r, g, b] = [x, c, 0];
+    } else if (h >= 120 && h < 180) {
+      [r, g, b] = [0, c, x];
+    } else if (h >= 180 && h < 240) {
+      [r, g, b] = [0, x, c];
+    } else if (h >= 240 && h < 300) {
+      [r, g, b] = [x, 0, c];
+    } else {
+      [r, g, b] = [c, 0, x];
+    }
+    
+    return [
+      Math.round((r + m) * 255),
+      Math.round((g + m) * 255),
+      Math.round((b + m) * 255)
+    ];
+  }
+
+  getColorAt = (x) => {
+    // Arc-en-ciel HSV parfaitement smooth qui boucle
+    const hue = ((x + this.config.rainbowRotation) % 1.0) * 360;
+    const saturation = 1.0;  // Couleurs vives
+    const value = 1.0;       // Luminosité max
+    
+    return this.hsvToRgb(hue, saturation, value);
+  }
+
   getActuatorColor = (mu, intensity = 1) => {
-    // Couleur principale basée sur µ
-    const colors = [
-      [255, 0, 0],     // Rouge (µ=0)
-      [255, 165, 0],   // Orange 
-      [255, 255, 0],   // Jaune
-      [0, 255, 0],     // Vert
-      [0, 0, 255],     // Bleu
-      [128, 0, 128]    // Violet (µ=1)
-    ];
-    
-    const scaledMu = mu * (colors.length - 1);
-    const index = Math.floor(scaledMu);
-    const t = scaledMu - index;
-    
-    const color1 = colors[Math.min(index, colors.length - 1)];
-    const color2 = colors[Math.min(index + 1, colors.length - 1)];
-    
-    const mainColor = [
-      color1[0] * (1 - t) + color2[0] * t,
-      color1[1] * (1 - t) + color2[1] * t,
-      color1[2] * (1 - t) + color2[2] * t
-    ];
-    
+    const baseColor = this.getColorAt(mu);
     return [
-      Math.round(mainColor[0] * intensity),
-      Math.round(mainColor[1] * intensity),
-      Math.round(mainColor[2] * intensity)
+      Math.round(baseColor[0] * intensity),
+      Math.round(baseColor[1] * intensity),
+      Math.round(baseColor[2] * intensity)
     ];
   }
 
-  // ✅ NOUVEAU: Couleur de fond arc-en-ciel pour effet de révélation
   getRainbowBackgroundColor = (x) => {
-    // Arc-en-ciel continu sur l'axe x (0 à 1)
-    const colors = [
-      [255, 0, 0],     // Rouge
-      [255, 165, 0],   // Orange 
-      [255, 255, 0],   // Jaune
-      [0, 255, 0],     // Vert
-      [0, 0, 255],     // Bleu
-      [128, 0, 128]    // Violet
-    ];
-    
-    const scaledX = x * (colors.length - 1);
-    const index = Math.floor(scaledX);
-    const t = scaledX - index;
-    
-    const color1 = colors[Math.min(index, colors.length - 1)];
-    const color2 = colors[Math.min(index + 1, colors.length - 1)];
-    
-    return [
-      color1[0] * (1 - t) + color2[0] * t,
-      color1[1] * (1 - t) + color2[1] * t,
-      color1[2] * (1 - t) + color2[2] * t
-    ];
+    return this.getColorAt(x);
   }
 
   calculatePoints = (activeActuators, width, height) => {
@@ -208,6 +271,10 @@ class HapticVisualizerComponent extends Component {
     const nActive = activeActuators.length;
     const { resolution, heightScale } = this.config;
     const normFactor = this.calculateNormalizationFactor(nConfigured);
+    
+    // ✅ NOUVEAU: S'assurer que le cache couleurs est à jour
+    this.ensureColorCache(nActive);
+    
     const points = [];
 
     for (let i = 0; i <= resolution; i++) {
@@ -215,15 +282,8 @@ class HapticVisualizerComponent extends Component {
       let totalIntensity = 0;
       let weightedColor = [0, 0, 0];
 
-      // ✅ MODIFIÉ: Couleur de fond arc-en-ciel configurable
-      const backgroundIntensity = this.config.rainbowIntensity;
-      const rainbowColor = this.getRainbowBackgroundColor(x);
-      
-      // Commencer avec le fond arc-en-ciel
-      weightedColor[0] = rainbowColor[0] * backgroundIntensity;
-      weightedColor[1] = rainbowColor[1] * backgroundIntensity;
-      weightedColor[2] = rainbowColor[2] * backgroundIntensity;
-      totalIntensity = backgroundIntensity;
+      // ✅ MODIFIÉ: Plus de base arc-en-ciel globale
+      // L'arc-en-ciel influence maintenant chaque gaussienne individuellement
 
       // Ajouter les contributions des actuators
       activeActuators.forEach(([actuatorIndex, data], arrayIndex) => {
@@ -233,12 +293,22 @@ class HapticVisualizerComponent extends Component {
         const gaussianValue = this.gaussian(x, mu, sigma) * intensity;
 
         if (gaussianValue > 0.001) {
-          const color = this.getActuatorColor(mu, intensity);
+          // ✅ OPTIMISÉ: Couleurs depuis le cache
+          const actuatorColor = this.getCachedActuatorColor(nActive, arrayIndex, intensity);
+          const rainbowColorAtX = this.getCachedRainbowColor(i);
+          
+          // ✅ NOUVEAU: Mélange selon rainbowIntensity
+          const blendFactor = this.config.rainbowIntensity;
+          const finalColor = [
+            actuatorColor[0] * (1 - blendFactor) + rainbowColorAtX[0] * blendFactor,
+            actuatorColor[1] * (1 - blendFactor) + rainbowColorAtX[1] * blendFactor,
+            actuatorColor[2] * (1 - blendFactor) + rainbowColorAtX[2] * blendFactor
+          ];
           
           // Ajouter à la moyenne pondérée
-          weightedColor[0] += color[0] * gaussianValue;
-          weightedColor[1] += color[1] * gaussianValue;
-          weightedColor[2] += color[2] * gaussianValue;
+          weightedColor[0] += finalColor[0] * gaussianValue;
+          weightedColor[1] += finalColor[1] * gaussianValue;
+          weightedColor[2] += finalColor[2] * gaussianValue;
           totalIntensity += gaussianValue;
         }
       });
@@ -264,7 +334,7 @@ class HapticVisualizerComponent extends Component {
 
     this.ctx.beginPath();
     this.ctx.moveTo(0, height);
-
+    
     points.forEach((point, i) => {
       if (i === 0) {
         this.ctx.lineTo(point.x, point.y);
@@ -297,35 +367,7 @@ class HapticVisualizerComponent extends Component {
     this.ctx.shadowBlur = 0;
   }
 
-  renderTrailStroke = (points, alpha) => {
-    if (points.length < 2) return;
-
-    this.ctx.save();
-    this.ctx.globalAlpha = alpha;
-    this.ctx.beginPath();
-
-    points.forEach((point, i) => {
-      if (i === 0) {
-        this.ctx.moveTo(point.x, point.y);
-      } else {
-        const prevPoint = points[i - 1];
-        const cpX = (prevPoint.x + point.x) / 2;
-        this.ctx.quadraticCurveTo(prevPoint.x, prevPoint.y, cpX, (prevPoint.y + point.y) / 2);
-      }
-    });
-
-    const gradient = this.ctx.createLinearGradient(0, 0, this.canvasRef.current.clientWidth, 0);
-    points.forEach((point, i) => {
-      const stop = i / (points.length - 1);
-      const [r, g, b] = point.color;
-      gradient.addColorStop(stop, `rgb(${r}, ${g}, ${b})`);
-    });
-
-    this.ctx.strokeStyle = gradient;
-    this.ctx.lineWidth = 2;
-    this.ctx.stroke();
-    this.ctx.restore();
-  }
+  // ✅ SUPPRIMÉ: renderTrails() et renderTrailStroke()
 
   renderCurrentFrame = () => {
     const actuatorData = this.getCurrentActuatorData();
@@ -334,6 +376,11 @@ class HapticVisualizerComponent extends Component {
     if (activeActuators.length === 0) return;
 
     const canvas = this.canvasRef.current;
+    // ✅ AJOUTÉ: Vérification canvas null avant accès aux propriétés
+    if (!canvas) {
+      return;
+    }
+    
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
     
@@ -341,212 +388,190 @@ class HapticVisualizerComponent extends Component {
     this.renderGradientFill(points, width, height);
   }
 
-  renderTrails = () => {
-    this.trailHistory.forEach((trailData, index) => {
-      const age = this.trailHistory.length - index - 1;
-      const alpha = Math.pow(this.config.trailDecay, age);
-      
-      const activeActuators = this.getActiveActuators(trailData.actuatorData);
-      if (activeActuators.length === 0) return;
-
-      const canvas = this.canvasRef.current;
-      const width = canvas.clientWidth;
-      const height = canvas.clientHeight;
-      
-      const points = this.calculatePoints(activeActuators, width, height);
-      this.renderTrailStroke(points, alpha);
-    });
-  }
-
   // ============================================================================
-  // ANIMATION - INCHANGÉ
+  // ANIMATION - SIMPLIFIÉ
   // ============================================================================
 
   startAnimation = () => {
     const animate = () => {
+      // ✅ AJOUTÉ: Vérification que le composant est toujours monté
+      if (!this.canvasRef.current) {
+        return;
+      }
+      
       this.renderFrame();
       this.animationId = requestAnimationFrame(animate);
     };
     this.animationId = requestAnimationFrame(animate);
   }
 
+
   renderFrame = () => {
     if (!this.ctx) return;
 
     const canvas = this.canvasRef.current;
+    // ✅ AJOUTÉ: Vérification canvas null avant accès aux propriétés
+    if (!canvas) {
+      return;
+    }
+
     this.ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
 
-    if (this.state.isPlaying) {
-      this.renderTrails();
-    }
-
+    // ✅ SIMPLIFIÉ: Rendu direct de la frame courante, pas de trails
     this.renderCurrentFrame();
-
-    if (this.state.isPlaying) {
-      const snapshot = {
-        timestamp: performance.now(),
-        actuatorData: this.getCurrentActuatorData()
-      };
-
-      this.trailHistory.push(snapshot);
-
-      if (this.trailHistory.length > this.maxTrailFrames) {
-        this.trailHistory.shift();
-      }
-    }
   }
 
   // ============================================================================
-  // ✅ NOUVEAUTÉ: CONFIGURATION UI
+  // CONFIGURATION UI
   // ============================================================================
 
   toggleConfig = () => {
-    this.setState({ showConfig: !this.state.showConfig }, () => {
-      // ✅ AJOUT: Trigger refresh après toggle settings
-      if (this.props.onResize) {
-        this.props.onResize();
-      }
+    const newState = !this.state.showConfig;
+    
+    this.setState({ showConfig: newState }, () => {
+      this.core.notify('component:resize', {
+        source: 'HapticVisualizerComponent',
+        reason: `config-panel-${newState ? 'expanded' : 'collapsed'}`
+      });
     });
   }
 
   updateConfig = (key, value) => {
     this.config[key] = value;
-    // Vider le cache de normalisation si on change les sigmas
     if (key === 'sigmaMin' || key === 'sigmaMax') {
       this.normalizationCache.clear();
     }
-    this.forceUpdate(); // Re-render pour appliquer les changements
-  }
-
-  renderConfigPanel = () => {
-    if (!this.state.showConfig) return null;
-    
-    const { heightScale, sigmaMin, sigmaMax, rainbowIntensity } = this.config;
-    
-    return (
-      <div className="fp-section fp-section-compact" style={{ 
-        borderTop: '1px solid var(--border-color)',
-        backgroundColor: 'var(--background-color)'
-      }}>
-        <div className="fp-layout-column fp-layout-compact">
-          
-          {/* Height Scale */}
-          <div className="fp-layout-row">
-            <label className="fp-label fp-no-shrink" style={{ minWidth: '80px' }}>
-              Height: {(heightScale * 100).toFixed(0)}%
-            </label>
-            <input
-              className="fp-input fp-range fp-flex"
-              type="range"
-              min="0.1"
-              max="1.0"
-              step="0.05"
-              value={heightScale}
-              onChange={(e) => this.updateConfig('heightScale', parseFloat(e.target.value))}
-            />
-          </div>
-          
-          {/* Sigma Min */}
-          <div className="fp-layout-row">
-            <label className="fp-label fp-no-shrink" style={{ minWidth: '80px' }}>
-              Sigma Min: {(sigmaMin * 100).toFixed(1)}
-            </label>
-            <input
-              className="fp-input fp-range fp-flex"
-              type="range"
-              min="0.005"
-              max="0.1"
-              step="0.005"
-              value={sigmaMin}
-              onChange={(e) => this.updateConfig('sigmaMin', parseFloat(e.target.value))}
-            />
-          </div>
-          
-          {/* Sigma Max */}
-          <div className="fp-layout-row">
-            <label className="fp-label fp-no-shrink" style={{ minWidth: '80px' }}>
-              Sigma Max: {(sigmaMax * 100).toFixed(1)}
-            </label>
-            <input
-              className="fp-input fp-range fp-flex"
-              type="range"
-              min="0.05"
-              max="0.3"
-              step="0.01"
-              value={sigmaMax}
-              onChange={(e) => this.updateConfig('sigmaMax', parseFloat(e.target.value))}
-            />
-          </div>
-          
-          {/* ✅ NOUVEAU: Rainbow Intensity */}
-          <div className="fp-layout-row">
-            <label className="fp-label fp-no-shrink" style={{ minWidth: '80px' }}>
-              Rainbow: {(rainbowIntensity * 100).toFixed(0)}%
-            </label>
-            <input
-              className="fp-input fp-range fp-flex"
-              type="range"
-              min="0.0"
-              max="0.5"
-              step="0.05"
-              value={rainbowIntensity}
-              onChange={(e) => this.updateConfig('rainbowIntensity', parseFloat(e.target.value))}
-            />
-          </div>
-          
-        </div>
-      </div>
-    );
+    this.forceUpdate();
   }
 
   // ============================================================================
-  // ✅ NOUVEAUTÉ: RENDER AVEC CONTRÔLES
+  // RENDER PRINCIPAL
   // ============================================================================
-
+  
   render() {
+
+    const { visible = true } = this.props;  // ✅ Défaut visible pour rétrocompatibilité
+  
+    // ✅ Option 1: Return null (plus performant, pas d'espace DOM)
+    if (!visible) {
+      return null;
+    }
+
     return (
-      <div className="haptic-visualizer">
+      <div className="fp-haptic-visualizer">
         
         {/* Canvas avec bouton config */}
-        <div className="fp-section" style={{ position: 'relative' }}>
+        <div className="fp-haptic-visualizer-canvas-area">
           <canvas
             ref={this.canvasRef}
-            className="haptic-visualizer-canvas"
-            style={{
-              width: '100%',
-              height: '120px',
-              backgroundColor: 'var(--background-color)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 'calc(var(--base-radius) * 0.5)',
-              display: 'block'
-            }}
+            className="fp-haptic-visualizer-canvas"
           />
           
           {/* Bouton config discret */}
           <button
-            className="fp-btn fp-btn-ghost"
+            className="fp-haptic-visualizer-config-btn"
             onClick={this.toggleConfig}
-            style={{
-              position: 'absolute',
-              top: '4px',
-              right: '4px',
-              width: '24px',
-              height: '24px',
-              padding: '0',
-              fontSize: '12px',
-              opacity: '0.6',
-              background: 'rgba(0,0,0,0.1)',
-              border: 'none',
-              borderRadius: '50%'
-            }}
-            title="Configuration"
+            title="Visualizer settings"
           >
             ⚙️
           </button>
         </div>
         
-        {/* Panneau de configuration */}
-        {this.renderConfigPanel()}
+        {/* Panel de configuration */}
+        {this.state.showConfig && (
+          <div className="fp-haptic-visualizer-config">
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Resolution: {this.config.resolution}
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="50"
+                max="500"
+                step="25"
+                value={this.config.resolution}
+                onChange={(e) => this.updateConfig('resolution', parseInt(e.target.value))}
+              />
+            </div>
+            
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Height: {(this.config.heightScale * 100).toFixed(0)}%
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="0.1"
+                max="1.0"
+                step="0.05"
+                value={this.config.heightScale}
+                onChange={(e) => this.updateConfig('heightScale', parseFloat(e.target.value))}
+              />
+            </div>
+            
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Sigma Min: {this.config.sigmaMin.toFixed(2)}
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="0.01"
+                max="0.2"
+                step="0.01"
+                value={this.config.sigmaMin}
+                onChange={(e) => this.updateConfig('sigmaMin', parseFloat(e.target.value))}
+              />
+            </div>
+            
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Sigma Max: {this.config.sigmaMax.toFixed(2)}
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="0.05"
+                max="0.3"
+                step="0.01"
+                value={this.config.sigmaMax}
+                onChange={(e) => this.updateConfig('sigmaMax', parseFloat(e.target.value))}
+              />
+            </div>
+            
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Rainbow: {(this.config.rainbowIntensity * 100).toFixed(0)}%
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="0.0"
+                max="1"
+                step="0.05"
+                value={this.config.rainbowIntensity}
+                onChange={(e) => this.updateConfig('rainbowIntensity', parseFloat(e.target.value))}
+              />
+            </div>
+            
+            <div className="fp-haptic-visualizer-config-row">
+              <label className="fp-haptic-visualizer-config-label">
+                Hue: {(this.config.rainbowRotation * 360).toFixed(0)}°
+              </label>
+              <input
+                className="fp-haptic-visualizer-config-range"
+                type="range"
+                min="0.0"
+                max="1.0"
+                step="0.02"
+                value={this.config.rainbowRotation}
+                onChange={(e) => this.updateConfig('rainbowRotation', parseFloat(e.target.value))}
+              />
+            </div>
+            
+          </div>
+        )}
         
       </div>
     );

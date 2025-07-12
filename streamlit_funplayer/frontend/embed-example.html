@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FunPlayer Web Component - Exemples d'intégration</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      line-height: 1.6;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    
+    .example-section {
+      margin-bottom: 40px;
+      padding: 20px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      background: #fafafa;
+    }
+    
+    .example-section h3 {
+      margin-top: 0;
+      color: #333;
+      border-bottom: 2px solid #ff4b4b;
+      padding-bottom: 10px;
+    }
+    
+    pre {
+      background: #2d3748;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 5px;
+      overflow-x: auto;
+      font-size: 14px;
+    }
+    
+    .player-container {
+      margin: 20px 0;
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 20px;
+      background: white;
+    }
+    
+    .controls {
+      margin: 15px 0;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    
+    button {
+      padding: 8px 16px;
+      border: 1px solid #ff4b4b;
+      background: white;
+      color: #ff4b4b;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: #ff4b4b;
+      color: white;
+    }
+    
+    .log {
+      background: #1a202c;
+      color: #68d391;
+      padding: 10px;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    
+    .status {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    
+    .status.ready { background: #c6f6d5; color: #22543d; }
+    .status.loading { background: #fed7c5; color: #7b341e; }
+    .status.error { background: #fed7d7; color: #742a2a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 FunPlayer Web Component - Exemples d'intégration</h1>
+    <p>Démonstration de l'intégration FunPlayer dans différents contextes.</p>
+
+    <!-- ========================================================================== -->
+    <!-- EXEMPLE 1: Intégration HTML statique -->
+    <!-- ========================================================================== -->
+    <div class="example-section">
+      <h3>1. Intégration HTML statique</h3>
+      <p>Usage le plus simple : ajout direct en HTML avec attributs.</p>
+      
+      <pre><code>&lt;!-- Charger le script FunPlayer --&gt;
+&lt;script src="funplayer-embed.js"&gt;&lt;/script&gt;
+
+&lt;!-- Utiliser la balise custom --&gt;
+&lt;funplayer 
+  playlist='[{
+    "sources": [{"src": "demo-video.mp4", "type": "video/mp4"}],
+    "funscript": {"actions": [{"at": 0, "pos": 0}, {"at": 2000, "pos": 100}]},
+    "name": "Demo Scene"
+  }]'
+  theme='{"primaryColor": "#ff4b4b", "base": "light"}'
+&gt;&lt;/funplayer&gt;</code></pre>
+
+      <div class="player-container">
+        <div class="status loading" id="status1">⏳ Loading...</div>
+        <funplayer 
+          id="player1"
+          playlist='[{
+            "sources": [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", "type": "video/mp4"}],
+            "funscript": {"actions": [{"at": 0, "pos": 0}, {"at": 2000, "pos": 50}, {"at": 4000, "pos": 100}, {"at": 6000, "pos": 0}]},
+            "name": "Big Buck Bunny Demo"
+          }]'
+          theme='{"primaryColor": "#ff4b4b", "base": "light"}'
+        ></funplayer>
+      </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- EXEMPLE 2: Intégration JavaScript dynamique -->
+    <!-- ========================================================================== -->
+    <div class="example-section">
+      <h3>2. Intégration JavaScript dynamique</h3>
+      <p>Création programmatique avec événements et contrôles.</p>
+      
+      <pre><code>// Créer le player dynamiquement
+const player = FunPlayer.create('#container', {
+  playlist: [...],
+  theme: {...},
+  onPlay: (data) => console.log('Playing:', data),
+  onResize: (dims) => console.log('Resized:', dims)
+});
+
+// Ou manipulation directe
+const player = document.createElement('funplayer');
+player.setPlaylist([...]);
+player.addEventListener('funplayer-play', handlePlay);</code></pre>
+
+      <div class="controls">
+        <button onclick="createDynamicPlayer()">Créer Player Dynamique</button>
+        <button onclick="updatePlaylist()">Changer Playlist</button>
+        <button onclick="updateTheme()">Changer Thème</button>
+        <button onclick="clearLog()">Clear Log</button>
+      </div>
+      
+      <div class="player-container">
+        <div class="status loading" id="status2">⏳ Pas encore créé</div>
+        <div id="dynamic-container">
+          <!-- Le player sera créé ici dynamiquement -->
+        </div>
+      </div>
+      
+      <div class="log" id="event-log">Événements s'afficheront ici...</div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- EXEMPLE 3: Intégration iframe (pour WordPress, etc.) -->
+    <!-- ========================================================================== -->
+    <div class="example-section">
+      <h3>3. Intégration iframe (WordPress, CMS)</h3>
+      <p>Pour intégration dans CMS avec gestion automatique du resize.</p>
+      
+      <pre><code>&lt;!-- Page iframe (embed.html) --&gt;
+&lt;script src="funplayer-embed.js"&gt;&lt;/script&gt;
+&lt;funplayer playlist="..." onResize="notifyParent"&gt;&lt;/funplayer&gt;
+
+&lt;script&gt;
+function notifyParent(dimensions) {
+  window.parent.postMessage({
+    type: 'funplayer-resize',
+    height: dimensions.height
+  }, '*');
+}
+&lt;/script&gt;
+
+&lt;!-- Page parent (WordPress) --&gt;
+&lt;iframe src="embed.html" id="funplayer-frame"&gt;&lt;/iframe&gt;
+&lt;script&gt;
+window.addEventListener('message', (e) => {
+  if (e.data.type === 'funplayer-resize') {
+    document.getElementById('funplayer-frame').style.height = e.data.height + 'px';
+  }
+});
+&lt;/script&gt;</code></pre>
+
+      <div class="player-container">
+        <div class="status ready" id="status3">✅ Simulation iframe</div>
+        <iframe 
+          src="data:text/html;charset=utf-8,
+          <script src='./funplayer-embed.js'></script>
+          <funplayer playlist='[{&quot;name&quot;:&quot;Iframe Demo&quot;}]'></funplayer>
+          <script>
+            window.parent.postMessage({type:'iframe-ready'}, '*');
+          </script>" 
+          style="width: 100%; height: 300px; border: 1px solid #ddd;"
+        ></iframe>
+      </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- EXEMPLE 4: API et événements avancés -->
+    <!-- ========================================================================== -->
+    <div class="example-section">
+      <h3>4. API et événements avancés</h3>
+      <p>Utilisation complète de l'API avec tous les événements HTML5.</p>
+      
+      <pre><code>// Tous les événements supportés
+const events = FunPlayer.getSupportedEvents();
+events.forEach(event => {
+  player.addEventListener(`funplayer-${event}`, (e) => {
+    console.log(`${event}:`, e.detail);
+  });
+});
+
+// Documentation des événements
+const docs = FunPlayer.getEventDocumentation();
+console.log(docs);</code></pre>
+
+      <div class="controls">
+        <button onclick="showSupportedEvents()">Événements Supportés</button>
+        <button onclick="showEventDocs()">Documentation Événements</button>
+        <button onclick="testAllCallbacks()">Test Tous Callbacks</button>
+      </div>
+      
+      <div id="api-output" class="log">Output API s'affichera ici...</div>
+    </div>
+  </div>
+
+  <!-- ========================================================================== -->
+  <!-- CHARGEMENT DU SCRIPT FUNPLAYER -->
+  <!-- ========================================================================== -->
+  <script src="./funplayer-embed.js"></script>
+
+  <!-- ========================================================================== -->
+  <!-- SCRIPTS D'EXEMPLE -->
+  <!-- ========================================================================== -->
+  <script>
+    // ============================================================================
+    // ÉTAT GLOBAL
+    // ============================================================================
+    let dynamicPlayer = null;
+    let eventCount = 0;
+
+    // ============================================================================
+    // UTILITAIRES
+    // ============================================================================
+    function log(message, type = 'info') {
+      const logEl = document.getElementById('event-log');
+      const timestamp = new Date().toLocaleTimeString();
+      const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+      logEl.textContent += `[${timestamp}] ${prefix} ${message}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function clearLog() {
+      document.getElementById('event-log').textContent = 'Log cleared...\n';
+      eventCount = 0;
+    }
+
+    function updateStatus(id, status, text) {
+      const el = document.getElementById(id);
+      el.className = `status ${status}`;
+      el.textContent = text;
+    }
+
+    // ============================================================================
+    // EXEMPLE 2: PLAYER DYNAMIQUE
+    // ============================================================================
+    function createDynamicPlayer() {
+      if (dynamicPlayer) {
+        log('Player déjà créé, destruction...', 'info');
+        dynamicPlayer.remove();
+      }
+
+      const container = document.getElementById('dynamic-container');
+      
+      try {
+        dynamicPlayer = FunPlayer.create(container, {
+          playlist: [{
+            sources: [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4", "type": "video/mp4"}],
+            funscript: {
+              actions: [
+                {"at": 0, "pos": 20},
+                {"at": 1000, "pos": 80},
+                {"at": 2000, "pos": 40},
+                {"at": 3000, "pos": 90},
+                {"at": 4000, "pos": 10}
+              ]
+            },
+            name: "Elephants Dream"
+          }],
+          theme: {"primaryColor": "#9333ea", "base": "dark"},
+          
+          // Callbacks pour tous les événements principaux
+          onPlay: (data) => log(`▶️ Play: ${data.currentTime?.toFixed(1)}s`),
+          onPause: (data) => log(`⏸️ Pause: ${data.currentTime?.toFixed(1)}s`),
+          onEnded: () => log('🏁 Ended', 'success'),
+          onTimeUpdate: (data) => {
+            eventCount++;
+            if (eventCount % 30 === 0) { // Log every second at 30fps
+              log(`⏱️ Time: ${data.currentTime?.toFixed(1)}s`);
+            }
+          },
+          onResize: (dims) => log(`📐 Resize: ${dims.width}x${dims.height}`),
+          onError: (error) => log(`❌ Error: ${error.message}`, 'error')
+        });
+
+        updateStatus('status2', 'ready', '✅ Player créé dynamiquement');
+        log('Player créé avec succès!', 'success');
+        
+      } catch (error) {
+        updateStatus('status2', 'error', '❌ Erreur création');
+        log(`Erreur création: ${error.message}`, 'error');
+      }
+    }
+
+    function updatePlaylist() {
+      if (!dynamicPlayer) {
+        log('Aucun player dynamique trouvé', 'error');
+        return;
+      }
+
+      const newPlaylist = [{
+        sources: [{"src": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4", "type": "video/mp4"}],
+        funscript: {
+          actions: [
+            {"at": 0, "pos": 0},
+            {"at": 500, "pos": 100},
+            {"at": 1000, "pos": 0},
+            {"at": 1500, "pos": 80}
+          ]
+        },
+        name: "For Bigger Blazes"
+      }];
+
+      dynamicPlayer.setPlaylist(newPlaylist);
+      log('Playlist mise à jour', 'success');
+    }
+
+    function updateTheme() {
+      if (!dynamicPlayer) {
+        log('Aucun player dynamique trouvé', 'error');
+        return;
+      }
+
+      const themes = [
+        {"primaryColor": "#10b981", "base": "light"},
+        {"primaryColor": "#f59e0b", "base": "dark"},
+        {"primaryColor": "#ef4444", "base": "light"},
+        {"primaryColor": "#8b5cf6", "base": "dark"}
+      ];
+
+      const randomTheme = themes[Math.floor(Math.random() * themes.length)];
+      dynamicPlayer.setTheme(randomTheme);
+      log(`Thème changé: ${randomTheme.primaryColor} (${randomTheme.base})`, 'success');
+    }
+
+    // ============================================================================
+    // EXEMPLE 4: API AVANCÉE
+    // ============================================================================
+    function showSupportedEvents() {
+      const events = FunPlayer.getSupportedEvents();
+      const output = document.getElementById('api-output');
+      output.textContent = `Événements supportés (${events.length}):\n${events.join(', ')}`;
+    }
+
+    function showEventDocs() {
+      const docs = FunPlayer.getEventDocumentation();
+      const output = document.getElementById('api-output');
+      
+      let text = 'Documentation des événements:\n\n';
+      
+      Object.entries(docs.videoJsEvents).forEach(([event, info]) => {
+        text += `${event}:\n`;
+        text += `  - Description: ${info.description}\n`;
+        text += `  - DOM Event: ${info.domEvent}\n`;
+        text += `  - Data: ${info.dataStructure}\n\n`;
+      });
+      
+      output.textContent = text;
+    }
+
+    function testAllCallbacks() {
+      log('Test de tous les callbacks en cours...', 'info');
+      
+      // Simuler des événements
+      setTimeout(() => log('🎯 Test onPlay callback'), 100);
+      setTimeout(() => log('🎯 Test onTimeUpdate callback'), 200);
+      setTimeout(() => log('🎯 Test onPause callback'), 300);
+      setTimeout(() => log('🎯 Test onResize callback'), 400);
+      setTimeout(() => log('✅ Test callbacks terminé', 'success'), 500);
+    }
+
+    // ============================================================================
+    // INITIALISATION
+    // ============================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      // Setup événements pour player statique
+      const player1 = document.getElementById('player1');
+      
+      player1.addEventListener('funplayer-play', () => {
+        updateStatus('status1', 'ready', '▶️ Playing');
+      });
+      
+      player1.addEventListener('funplayer-pause', () => {
+        updateStatus('status1', 'ready', '⏸️ Paused');
+      });
+      
+      player1.addEventListener('funplayer-loadedmetadata', () => {
+        updateStatus('status1', 'ready', '✅ Ready');
+      });
+      
+      player1.addEventListener('funplayer-error', (e) => {
+        updateStatus('status1', 'error', '❌ Error');
+        log(`Player 1 Error: ${e.detail?.message}`, 'error');
+      });
+
+      // Message initial
+      log('🎮 FunPlayer Web Component examples loaded!', 'success');
+      log(`Version: ${FunPlayer.version}`, 'info');
+      log(`Events supported: ${FunPlayer.getSupportedEvents().length}`, 'info');
+    });
+
+    // Gestion messages iframe
+    window.addEventListener('message', (e) => {
+      if (e.data.type === 'iframe-ready') {
+        updateStatus('status3', 'ready', '✅ Iframe loaded');
+        log('Iframe player ready', 'success');
+      }
+      if (e.data.type === 'funplayer-resize') {
+        log(`Iframe resize: ${e.data.height}px`, 'info');
+      }
+    });
+  </script>
+</body>
+</html>
